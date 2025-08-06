@@ -171,31 +171,30 @@ def analyze_resume(text, domain):
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     input_prompt = evaluation_prompt.format_prompt(resume_text=resume_text, jd_text=jd_text)
     output = llm.invoke(input_prompt.to_messages())
-    raw = output.content
+    raw = output.content.strip()
 
-    # Try parsing raw output directly first
     try:
-        return parser.parse(raw)
-    except Exception:
-        # Fallback: extract JSON manually
-        try:
-            match = re.search(r'\{.*?\}', raw, re.DOTALL)
-            if match:
-                json_str = match.group()
-                
-                # Remove common issues (like trailing commas)
-                json_str = re.sub(r",\s*}", "}", json_str)
-                json_str = re.sub(r",\s*]", "]", json_str)
+        # Attempt to extract JSON manually
+        match = re.search(r"\{.*?\}", raw, re.DOTALL)
+        if not match:
+            raise ValueError("No JSON object found in model output.")
+        
+        json_str = match.group()
+        json_str = re.sub(r",\s*}", "}", json_str)  # Remove trailing commas
+        json_str = re.sub(r",\s*]", "]", json_str)
 
-                try:
-                    data = json.loads(json_str)
-                    return ResumeAnalysis(**data)
-                except json.JSONDecodeError as je:
-                    raise ValueError(f"JSON decoding failed: {je}\nRaw JSON: {json_str}")
-            else:
-                raise ValueError("No JSON object found in model output.")
-        except Exception as e:
-            raise ValueError(f"Invalid JSON output: {e}")
+        # Load into Python dict
+        data = json.loads(json_str)
+
+        # Enforce job_match rule manually
+        score = int(data.get("score", 0))
+        data["job_match"] = "yes" if score >= 60 else "no"
+
+        return ResumeAnalysis(**data)
+
+    except Exception as e:
+        raise ValueError(f"⚠️ Evaluation failed: {e}\n\nRaw output:\n{raw}")
+
 
 
 
