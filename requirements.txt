@@ -14,6 +14,7 @@ python-dotenv
 # Hugging Face Integration
 langchain-huggingface
 huggingface-hub
+sentence-transformers 
 
 # to get document loaders
 langchain-community
