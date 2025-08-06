@@ -15,7 +15,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
@@ -29,7 +29,7 @@ TOP_K = 5
 # ------------------- Schema Definition -------------------
 class ResumeAnalysis(BaseModel):
     domain: str = Field(..., description="Predicted domain of the resume")
-    summary: str = Field(..., description="3-line summary")
+    summary: Optional[str] = Field(default="Summary not provided.", description="3-line summary")
     strengths: List[str] = Field(..., description="Resume strengths as a list")
     weaknesses: List[str] = Field(..., description="Resume weaknesses as a list")
     score: int = Field(..., description="Overall score out of 100")
