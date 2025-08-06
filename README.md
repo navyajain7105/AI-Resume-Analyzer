@@ -1,6 +1,6 @@
 # 🧠 AI Resume Analyzer + Matcher
 
-This Streamlit app uses **LLMs (Mistral via Groq)**, **LangChain**, and **FAISS** to intelligently:
+This Streamlit app uses **LLMs (LLama via Groq)**, **LangChain**, and **FAISS** to intelligently:
 
 - 📄 Analyze uploaded resumes (PDF/DOCX/TXT)
 - 🧠 Extract metadata (name, phone, email, LinkedIn, GitHub)

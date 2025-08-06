@@ -68,7 +68,7 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
 
 load_dotenv()
 
-llm = ChatGroq(model_name="mistral-saba-24b")
+llm = ChatGroq(model_name="llama-3.1-8b-instant")
 
 # ------------------------- Helper Functions -------------------------
 
