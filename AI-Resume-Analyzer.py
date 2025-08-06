@@ -179,14 +179,25 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     except Exception:
         # Fallback: extract JSON manually
         try:
-            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            match = re.search(r'\{.*?\}', raw, re.DOTALL)
             if match:
-                data = json.loads(match.group())
-                return ResumeAnalysis(**data)
+                json_str = match.group()
+                
+                # Remove common issues (like trailing commas)
+                json_str = re.sub(r",\s*}", "}", json_str)
+                json_str = re.sub(r",\s*]", "]", json_str)
+
+                try:
+                    data = json.loads(json_str)
+                    return ResumeAnalysis(**data)
+                except json.JSONDecodeError as je:
+                    raise ValueError(f"JSON decoding failed: {je}\nRaw JSON: {json_str}")
             else:
                 raise ValueError("No JSON object found in model output.")
         except Exception as e:
             raise ValueError(f"Invalid JSON output: {e}")
+
+
 
 # ------------------- Streamlit App -------------------
 st.set_page_config(page_title="AI Resume Analyzer")
@@ -267,7 +278,14 @@ if st.button("Run Analysis"):
 
             for row in all_results:
                 rid = row["Resume ID"]
-                row["Job Match"] = "✅ Yes" if rid in top_ids else "❌ No"
+                if rid in evaluated:
+                    row["Strengths"] = "\n".join(evaluated[rid].strengths)
+                    row["Weaknesses"] = "\n".join(evaluated[rid].weaknesses)
+                    row["Score"] = evaluated[rid].score
+                    row["Job Match"] = "✅ Yes" if evaluated[rid].job_match.lower() == "yes" else "❌ No"
+                else:
+                    row["Job Match"] = "❌ No"
+
                 if rid in evaluated:
                     row["Strengths"] = "\n".join(evaluated[rid].strengths)
                     row["Weaknesses"] = "\n".join(evaluated[rid].weaknesses)
