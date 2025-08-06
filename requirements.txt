@@ -1,0 +1,33 @@
+# LangChain Core
+langchain
+langchain-core
+
+# ui
+streamlit
+
+# Groq Integration
+langchain-groq
+
+# Environment Variable Management
+python-dotenv
+
+# Hugging Face Integration
+langchain-huggingface
+huggingface-hub
+
+# to get document loaders
+langchain-community
+pypdf
+docx2txt
+document
+
+# vectorstore
+faiss-cpu
+
+python-docx
+
+PyMuPDF
+
+pandas
+
+openpyxl
