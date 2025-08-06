@@ -4,6 +4,7 @@ import re
 import fitz  # PyMuPDF
 import docx
 import pandas as pd
+import json
 import streamlit as st
 from io import BytesIO
 
@@ -17,6 +18,7 @@ from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from dotenv import load_dotenv
+
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGCHAIN_API_KEY"] = ""
@@ -135,7 +137,22 @@ def analyze_resume(text, domain):
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     input_prompt = evaluation_prompt.format_prompt(resume_text=resume_text, jd_text=jd_text)
     output = llm.invoke(input_prompt.to_messages())
-    return parser.parse(output.content)
+    raw = output.content
+
+    # Try parsing raw output directly first
+    try:
+        return parser.parse(raw)
+    except Exception:
+        # Fallback: extract JSON manually
+        try:
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                return ResumeAnalysis(**data)
+            else:
+                raise ValueError("No JSON object found in model output.")
+        except Exception as e:
+            raise ValueError(f"Invalid JSON output: {e}")
 
 # ------------------- Streamlit App -------------------
 st.set_page_config(page_title="AI Resume Analyzer")
