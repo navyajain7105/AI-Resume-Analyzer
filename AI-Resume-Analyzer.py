@@ -35,6 +35,7 @@ class ResumeAnalysis(BaseModel):
     strengths: List[str] = Field(..., description="Resume strengths as a list")
     weaknesses: List[str] = Field(..., description="Resume weaknesses as a list")
     score: int = Field(..., description="Overall score out of 100")
+    job_match: str = Field(..., description="yes if score >= 60, else no")
 
 parser = PydanticOutputParser(pydantic_object=ResumeAnalysis)
 
