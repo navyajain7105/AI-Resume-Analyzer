@@ -52,24 +52,6 @@ Resume:
 
 evaluation_prompt = ChatPromptTemplate.from_messages([
     ("system", 
-     "You are a strict technical evaluator comparing a candidate resume against a job description.\n"
-     "Focus only on *actual experience*. Do not trust skills section if no real work/project context is found.\n"
-     "Check alignment of cloud platform (e.g., AWS vs Azure), tools, domain expertise, project relevance, experience years, and gaps.\n"
-     "Be strict and conservative in scoring. Only proven skills matter.\n\n"
-     "Return JSON with: domain, strengths, weaknesses, and score out of 100.\n\n"
-     "Scoring Criteria:\n"
-     "- Required experience missing = big penalty\n"
-     "- Skill mentioned but no work done = medium penalty\n"
-     "- Good alignment = boost\n"
-     "- Irrelevant experience = neutral or penalty\n"),
-    ("human", 
-     "Job Description:\n{jd_text}\n\n"
-     "Candidate Resume:\n{resume_text}\n\n"
-     "Return output in JSON with the following keys:\n"
-     "domain, strengths (list), weaknesses (list), score (integer out of 100)")
-])
-evaluation_prompt = ChatPromptTemplate.from_messages([
-    ("system", 
      "You are a strict technical evaluator tasked with comparing a resume against a job description for hiring purposes.\n\n"
      "Instructions:\n"
      "- Focus only on *actual experience*. Do not trust skills section if no real work/project context is found.\n"
@@ -175,7 +157,8 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
 
     try:
         # Attempt to extract JSON manually
-        match = re.search(r"\{.*?\}", raw, re.DOTALL)
+        match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
+
         if not match:
             raise ValueError("No JSON object found in model output.")
         
