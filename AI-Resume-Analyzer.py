@@ -67,6 +67,39 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
      "Return output in JSON with the following keys:\n"
      "domain, strengths (list), weaknesses (list), score (integer out of 100)")
 ])
+evaluation_prompt = ChatPromptTemplate.from_messages([
+    ("system", 
+     "You are a strict technical evaluator tasked with comparing a resume against a job description for hiring purposes.\n\n"
+     "Instructions:\n"
+     "- Focus only on *actual experience*. Do not trust skills section if no real work/project context is found.\n"
+     "- Check alignment of cloud platform (e.g., AWS vs Azure), tools, domain expertise, project relevance, experience years, and gaps.\n"
+     "- Be strict and conservative in scoring. Only proven skills matter.\n\n"
+     "- ONLY consider real-world experience (internships, jobs, GitHub projects, freelance work, hackathons, etc.)\n"
+     "- DO NOT give credit for academic courses or subjects unless backed by hands-on implementation.\n"
+     "- DO NOT trust 'Skills' sections unless supported by actual project work.\n"
+     "- Evaluate alignment of the resume with job-specific technologies, tools, and responsibilities.\n"
+     "- Use job description keywords to check if the resume demonstrates relevant experience.\n"
+     "- Score must be STRICT:\n"
+     "  - 90–100: Excellent match\n"
+     "  - 70–89: Good match\n"
+     "  - 60–69: Borderline match\n"
+     "  - Below 60: Not a good match (Mark job_match = 'no')\n"
+     "- If no relevant projects/internships/tools, the score must be < 40.\n\n"
+     "Return STRICTLY in this JSON format:\n"
+     "{\n"
+     '  "domain": "Predicted domain of the resume",\n'
+     '  "summary": "3-line summary of the candidate",\n'
+     '  "strengths": ["List of strengths"],\n'
+     '  "weaknesses": ["List of weaknesses"],\n'
+     '  "score": Integer score between 0 and 100,\n'
+     '  "job_match": "yes" or "no" based on score (yes if score >= 60)\n'
+     "}"
+    ),
+    ("human", 
+     "Job Description:\n{jd_text}\n\n"
+     "Candidate Resume:\n{resume_text}\n\n"
+     "Return ONLY the JSON response. Do NOT explain anything.")
+])
 
 load_dotenv()
 
