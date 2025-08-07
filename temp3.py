@@ -502,7 +502,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     }
     
     # Convert the input domain to lowercase before lookup
-mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
+    mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
     domain_config = domain_evidence.get(mapped_domain, domain_evidence['software_development'])
     
     # Calculate proven work score (60% of total)
