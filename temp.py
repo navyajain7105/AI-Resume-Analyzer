@@ -52,36 +52,33 @@ Resume:
 
 evaluation_prompt = ChatPromptTemplate.from_messages([
     ("system", 
-     "You are a strict technical evaluator tasked with comparing a resume against a job description for hiring purposes.\n\n"
+     "You are a strict technical evaluator. You must respond with ONLY valid JSON, no other text.\n\n"
      "Instructions:\n"
-     "- Focus only on *actual experience*. Do not trust skills section if no real work/project context is found.\n"
-     "- Check alignment of cloud platform (e.g., AWS vs Azure), tools, domain expertise, project relevance, experience years, and gaps.\n"
-     "- Be strict and conservative in scoring. Only proven skills matter.\n\n"
-     "- ONLY consider real-world experience (internships, jobs, GitHub projects, freelance work, hackathons, etc.)\n"
-     "- DO NOT give credit for academic courses or subjects unless backed by hands-on implementation.\n"
-     "- DO NOT trust 'Skills' sections unless supported by actual project work.\n"
-     "- Evaluate alignment of the resume with job-specific technologies, tools, and responsibilities.\n"
-     "- Use job description keywords to check if the resume demonstrates relevant experience.\n"
-     "- Score must be STRICT:\n"
-     "  - 90–100: Excellent match\n"
-     "  - 70–89: Good match\n"
-     "  - 60–69: Borderline match\n"
-     "  - Below 60: Not a good match\n"
-     "- If no relevant projects/internships/tools, the score must be < 40.\n\n"
-     "IMPORTANT: You must respond with valid JSON only. Do not include any explanatory text, markdown formatting, or code blocks. Start directly with { and end with }."
+     "- Focus only on actual experience, not skills sections without context\n"
+     "- Be strict and conservative in scoring\n"
+     "- Score must be between 0-100\n"
+     "- Below 60 = not a good match\n"
+     "- Return ONLY the JSON object, nothing else"
     ),
      ("human", 
-        """Job Description:
-        {jd_text}
+        """Analyze this resume against the job description.
 
-        Candidate Resume:
-        {resume_text}
+Job Description:
+{jd_text}
 
-        Return only valid JSON in this exact format:
-        {format_instructions}
+Resume:
+{resume_text}
 
-        Remember: Return ONLY the JSON object, no other text or formatting.
-        """)
+Return ONLY this JSON format:
+{{
+  "domain": "predicted domain",
+  "summary": "brief 3-line summary",
+  "strengths": ["strength1", "strength2", "strength3"],
+  "weaknesses": ["weakness1", "weakness2", "weakness3"],
+  "score": 75
+}}
+
+JSON response:""")
 ])
 
 load_dotenv()
@@ -163,89 +160,143 @@ def clean_json_response(raw_response: str) -> str:
     if raw_response.endswith('```'):
         raw_response = raw_response[:-3]
     
+    raw_response = raw_response.strip()
+    
     # Find JSON object boundaries
     start = raw_response.find('{')
-    end = raw_response.rfind('}')
+    if start == -1:
+        raise ValueError(f"No opening brace found in response: '{raw_response[:100]}...'")
     
-    if start != -1 and end != -1 and end > start:
-        json_str = raw_response[start:end+1]
-        return json_str
+    # Find the matching closing brace by counting braces
+    brace_count = 0
+    end = -1
+    for i in range(start, len(raw_response)):
+        if raw_response[i] == '{':
+            brace_count += 1
+        elif raw_response[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end = i
+                break
     
-    raise ValueError("No valid JSON object found in response")
+    if end == -1:
+        raise ValueError(f"No matching closing brace found. Response starts with: '{raw_response[:200]}...'")
+    
+    json_str = raw_response[start:end+1]
+    return json_str
 
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     """Evaluate resume against job description with improved error handling"""
-    input_prompt = evaluation_prompt.format_prompt(
-        resume_text=resume_text,
-        jd_text=jd_text,
-        format_instructions=parser.get_format_instructions()
-    )
     
-    try:
-        response = llm.invoke(input_prompt.to_messages())
-        raw = response.content.strip()
-        
-        # Debug output (optional - comment out in production)
-        st.text_area(f"Raw LLM Output", raw, height=200)
-        
-        # Clean the response
-        cleaned_json = clean_json_response(raw)
-        st.text_area(f"Cleaned JSON", cleaned_json, height=150)
-        
-        # Try parsing with PydanticOutputParser first
+    # Try multiple approaches to get a valid response
+    for attempt in range(3):
         try:
-            result = parser.parse(cleaned_json)
-            if isinstance(result, ResumeAnalysis):
-                result.job_match = "yes" if result.score >= 60 else "no"
+            input_prompt = evaluation_prompt.format_prompt(
+                resume_text=resume_text,
+                jd_text=jd_text,
+                format_instructions=parser.get_format_instructions()
+            )
+            
+            response = llm.invoke(input_prompt.to_messages())
+            raw = response.content.strip()
+            
+            # Debug output (show only first 500 chars to avoid clutter)
+            st.text_area(f"Raw LLM Output (Attempt {attempt + 1})", raw[:500] + "..." if len(raw) > 500 else raw, height=150)
+            
+            # If response is too short or obviously malformed, try again
+            if len(raw) < 20 or not ('{' in raw and '}' in raw):
+                if attempt < 2:
+                    st.warning(f"Attempt {attempt + 1}: Response too short or malformed, retrying...")
+                    continue
+                else:
+                    raise ValueError(f"All attempts failed. Last response: '{raw}'")
+            
+            # Clean the response
+            try:
+                cleaned_json = clean_json_response(raw)
+                st.text_area(f"Cleaned JSON (Attempt {attempt + 1})", cleaned_json, height=150)
+            except Exception as clean_error:
+                if attempt < 2:
+                    st.warning(f"Attempt {attempt + 1}: JSON cleaning failed: {clean_error}")
+                    continue
+                else:
+                    raise ValueError(f"JSON cleaning failed after all attempts: {clean_error}")
+            
+            # Try parsing with PydanticOutputParser first
+            try:
+                result = parser.parse(cleaned_json)
+                if isinstance(result, ResumeAnalysis):
+                    result.job_match = "yes" if result.score >= 60 else "no"
+                    st.success(f"✅ Successfully parsed with PydanticOutputParser on attempt {attempt + 1}")
+                    return result
+            except Exception as parser_error:
+                st.warning(f"Attempt {attempt + 1}: PydanticOutputParser failed: {parser_error}")
+            
+            # Fallback to manual JSON parsing
+            try:
+                data = json.loads(cleaned_json)
+                
+                # Validate required keys
+                required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
+                missing_keys = [key for key in required_keys if key not in data]
+                if missing_keys:
+                    if attempt < 2:
+                        st.warning(f"Attempt {attempt + 1}: Missing keys: {missing_keys}")
+                        continue
+                    else:
+                        raise ValueError(f'Missing keys: {missing_keys} in parsed JSON')
+                
+                # Ensure correct data types
+                if not isinstance(data["strengths"], list):
+                    if isinstance(data["strengths"], str):
+                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                    else:
+                        data["strengths"] = ["Unable to parse strengths"]
+                
+                if not isinstance(data["weaknesses"], list):
+                    if isinstance(data["weaknesses"], str):
+                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
+                    else:
+                        data["weaknesses"] = ["Unable to parse weaknesses"]
+                
+                # Ensure score is integer
+                try:
+                    data["score"] = int(float(data["score"]))  # Handle both int and float strings
+                except (ValueError, TypeError):
+                    data["score"] = 0
+                
+                # Add job match determination
+                data["job_match"] = "yes" if data["score"] >= 60 else "no"
+                
+                result = ResumeAnalysis(**data)
+                st.success(f"✅ Successfully parsed with manual JSON parsing on attempt {attempt + 1}")
                 return result
-        except Exception as parser_error:
-            st.warning(f"PydanticOutputParser failed: {parser_error}")
-        
-        # Fallback to manual JSON parsing
-        try:
-            data = json.loads(cleaned_json)
-            
-            # Validate required keys
-            required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
-            for key in required_keys:
-                if key not in data:
-                    raise ValueError(f'Missing key: "{key}" in parsed JSON')
-            
-            # Ensure correct data types
-            if not isinstance(data["strengths"], list):
-                if isinstance(data["strengths"], str):
-                    data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                
+            except json.JSONDecodeError as json_error:
+                if attempt < 2:
+                    st.warning(f"Attempt {attempt + 1}: JSON parsing failed: {json_error}")
+                    continue
                 else:
-                    data["strengths"] = ["Unable to parse strengths"]
+                    raise ValueError(f"JSON parsing failed after all attempts: {json_error}\n\nFinal cleaned JSON:\n{cleaned_json}")
             
-            if not isinstance(data["weaknesses"], list):
-                if isinstance(data["weaknesses"], str):
-                    data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
-                else:
-                    data["weaknesses"] = ["Unable to parse weaknesses"]
-            
-            # Ensure score is integer
-            data["score"] = int(data["score"])
-            
-            # Add job match determination
-            data["job_match"] = "yes" if data["score"] >= 60 else "no"
-            
-            return ResumeAnalysis(**data)
-            
-        except json.JSONDecodeError as json_error:
-            raise ValueError(f"JSON parsing failed: {json_error}\n\nCleaned JSON:\n{cleaned_json}")
-        
-    except Exception as e:
-        st.error(f"LLM invocation failed: {e}")
-        # Return a default evaluation
-        return ResumeAnalysis(
-            domain="unknown",
-            summary="Analysis failed due to technical error",
-            strengths=["Unable to evaluate"],
-            weaknesses=["Technical evaluation error"],
-            score=0,
-            job_match="no"
-        )
+        except Exception as e:
+            if attempt < 2:
+                st.warning(f"Attempt {attempt + 1} failed: {e}")
+                continue
+            else:
+                st.error(f"All attempts failed. Final error: {e}")
+                break
+    
+    # Return a default evaluation if all attempts fail
+    st.warning("Returning default evaluation due to parsing failures")
+    return ResumeAnalysis(
+        domain="unknown",
+        summary="Analysis failed due to technical error - multiple parsing attempts unsuccessful",
+        strengths=["Unable to evaluate due to technical error"],
+        weaknesses=["Technical evaluation error occurred"],
+        score=0,
+        job_match="no"
+    )
 
 # ------------------- Streamlit App -------------------
 st.set_page_config(page_title="AI Resume Analyzer")
