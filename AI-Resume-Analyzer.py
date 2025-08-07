@@ -866,7 +866,7 @@ if st.button("Run Analysis"):
                 evaluation = evaluated.get(rid)
 
                 if evaluation:
-                    row["Domain"] = evaluation.domain 
+                    # row["Domain"] = evaluation.domain 
                     row["Strengths"] = "\n".join(evaluation.strengths)
                     row["Weaknesses"] = "\n".join(evaluation.weaknesses)
                     row["Score"] = evaluation.score
