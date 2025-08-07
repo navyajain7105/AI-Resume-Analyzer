@@ -177,11 +177,11 @@ def extract_text(file):
     return ""
 
 def extract_metadata(text: str):
-    """Improved metadata extraction with better regex patterns"""
+    """Improved metadata extraction with better regex patterns and corrected URL joining"""
     
-    # FIX: Pre-process text to join URLs broken by hyphens and newlines
-    # This handles cases like '.../navya-\njain-...'
-    processed_text = re.sub(r'-\s*\n', '', text)
+    # CORRECTED FIX: This now joins lines ending in a hyphen without deleting the hyphen itself.
+    # It also handles extra whitespace on the next line.
+    processed_text = re.sub(r'-\s*\n\s*', '-', text)
 
     # Name extraction - look for patterns after common indicators
     name_patterns = [
@@ -192,7 +192,6 @@ def extract_metadata(text: str):
     
     name = None
     for pattern in name_patterns:
-        # Use processed_text for search
         name_match = re.search(pattern, processed_text, re.MULTILINE)
         if name_match:
             candidate_name = name_match.group(1).strip()
@@ -220,38 +219,32 @@ def extract_metadata(text: str):
     # LinkedIn extraction
     linkedin_patterns = [
         r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%?=&]+/?",
-        r"linkedin\.com/in/[a-zA-Z0-9\-_%]+/?",
-        r"(?i)linkedin[:\s]*https?://[^\s]",
     ]
     
     linkedin = None
     for pattern in linkedin_patterns:
         linkedin_match = re.search(pattern, processed_text, re.IGNORECASE)
         if linkedin_match:
-            linkedin_url = linkedin_match.group().strip()
-            if 'linkedin' in linkedin_url.lower() and 'linkedin.com/in/' in linkedin_url:
-                if not linkedin_url.startswith('http'):
-                    linkedin_url = 'https://' + linkedin_url
-                linkedin = linkedin_url.rstrip('/')
-                break
+            linkedin_url = linkedin_match.group().strip().rstrip('/')
+            if not linkedin_url.startswith('http'):
+                linkedin_url = 'https://' + linkedin_url
+            linkedin = linkedin_url
+            break
     
     # GitHub extraction
     github_patterns = [
         r"https?://(?:www\.)?github\.com/[a-zA-Z0-9\-_%?=&]+/?",
-        r"github\.com/[a-zA-Z0-9\-_%]+/?",
-        r"(?i)github[:\s]*https?://[^\s]+",
     ]
     
     github = None
     for pattern in github_patterns:
         github_match = re.search(pattern, processed_text, re.IGNORECASE)
         if github_match:
-            github_url = github_match.group().strip()
-            if 'github' in github_url.lower() and 'github.com/' in github_url:
-                if not github_url.startswith('http'):
-                    github_url = 'https://' + github_url
-                github = github_url.rstrip('/')
-                break
+            github_url = github_match.group().strip().rstrip('/')
+            if not github_url.startswith('http'):
+                github_url = 'https://' + github_url
+            github = github_url
+            break
 
     return {
         "name": name,
@@ -405,18 +398,111 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
             'relevant_domains': ['data science', 'ai', 'artificial intelligence', 'deep learning', 'computer vision', 'nlp'],
             'cross_domain_penalty': 0.1  # Only 10% penalty for ML domain - very relevant
         },
-        # ... (other domain definitions remain the same) ...
+        'data_science': {
+            'core_implementations': [
+                'data visualization', 'statistical analysis', 'data cleaning', 'insights generated',
+                'dashboard created', 'report generated', 'trend analysis', 'data pipeline',
+                'business intelligence', 'predictive analytics', 'exploratory data analysis'
+            ],
+            'advanced_implementations': [
+                'big data processing', 'etl pipeline', 'data warehouse', 'real-time analytics',
+                'ab testing', 'statistical modeling', 'time series analysis'
+            ],
+            'deployment_proof': [
+                'tableau dashboard', 'power bi', 'plotly dashboard', 'jupyter notebook',
+                'data api', 'automated reports', 'business dashboard'
+            ],
+            'relevant_domains': ['machine learning', 'analytics', 'business intelligence', 'statistics'],
+            'cross_domain_penalty': 0.4  # 60% penalty for non-DS domains
+        },
+        'software_development': {
+            'core_implementations': [
+                'rest api', 'database connection', 'user authentication', 'responsive design',
+                'full stack application', 'web application', 'mobile app', 'backend server',
+                'frontend interface', 'database schema', 'deployed application'
+            ],
+            'advanced_implementations': [
+                'microservices', 'system architecture', 'scalable backend', 'real-time features',
+                'payment integration', 'third party apis', 'performance optimization'
+            ],
+            'deployment_proof': [
+                'live website', 'app store', 'play store', 'heroku', 'netlify', 'vercel',
+                'aws deployment', 'docker container', 'kubernetes'
+            ],
+            'relevant_domains': ['web development', 'mobile development', 'full stack', 'backend', 'frontend'],
+            'cross_domain_penalty': 0.5  # 50% penalty for non-software domains
+        },
+        'devops': {
+            'core_implementations': [
+                'ci/cd pipeline', 'automated deployment', 'infrastructure setup', 'monitoring system',
+                'containerized application', 'cloud deployment', 'server configuration',
+                'automated testing', 'deployment script', 'infrastructure code'
+            ],
+            'advanced_implementations': [
+                'kubernetes orchestration', 'terraform infrastructure', 'monitoring dashboards',
+                'log aggregation', 'security automation', 'disaster recovery'
+            ],
+            'deployment_proof': [
+                'jenkins pipeline', 'gitlab ci', 'github actions', 'docker hub',
+                'cloud formation', 'ansible playbook', 'monitoring alerts'
+            ],
+            'relevant_domains': ['cloud computing', 'infrastructure', 'automation', 'sre'],
+            'cross_domain_penalty': 0.6  # 40% penalty for non-devops domains
+        },
+        'frontend_development': {
+            'core_implementations': [
+                'responsive design', 'user interface', 'interactive components', 'state management',
+                'api integration', 'form validation', 'routing', 'component architecture'
+            ],
+            'advanced_implementations': [
+                'performance optimization', 'accessibility features', 'progressive web app',
+                'server side rendering', 'real-time updates', 'advanced animations'
+            ],
+            'deployment_proof': [
+                'live website', 'netlify deployment', 'vercel deployment', 'github pages',
+                'cdn deployment', 'mobile responsive', 'cross-browser testing'
+            ],
+            'relevant_domains': ['ui/ux', 'web development', 'mobile development'],
+            'cross_domain_penalty': 0.5
+        },
+        'backend_development': {
+            'core_implementations': [
+                'rest api', 'database design', 'authentication system', 'api documentation',
+                'data validation', 'error handling', 'logging', 'testing'
+            ],
+            'advanced_implementations': [
+                'microservices architecture', 'caching strategy', 'load balancing',
+                'database optimization', 'security implementation', 'rate limiting'
+            ],
+            'deployment_proof': [
+                'api endpoints', 'database deployment', 'server deployment', 'cloud hosting',
+                'docker container', 'performance metrics', 'uptime monitoring'
+            ],
+            'relevant_domains': ['full stack', 'web development', 'api development'],
+            'cross_domain_penalty': 0.5
+
+        }
     }
     
-    # Map target domain to evidence categories
+    
+    # Map target domain to evidence categories (Case-Insensitive)
     domain_map = {
         'ml': 'machine_learning',
         'machine learning': 'machine_learning',
-        'machine_learning': 'machine_learning',
-        # ... (other domain mappings remain the same) ...
+        'data science': 'data_science',
+        'datascience': 'data_science',
+        'software': 'software_development',
+        'software development': 'software_development',
+        'fullstack': 'software_development',
+        'full stack': 'software_development',
+        'backend': 'backend_development',
+        'frontend': 'frontend_development',
+        'devops': 'devops',
+        'general': 'software_development'  # Default fallback
     }
     
-    mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
+    # Convert the input domain to lowercase before lookup
+mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
     domain_config = domain_evidence.get(mapped_domain, domain_evidence['software_development'])
     
     # Calculate proven work score (60% of total)
@@ -485,7 +571,11 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
             'breakthrough concept award', 'agentic ai hackathon', 'world\'s biggest',
             'hackathon by google cloud', 'ai competition'
         ],
-        # ... (other competition domains) ...
+        'software_development': ['hackathon', 'coding competition', 'app competition'],
+
+        'data_science': ['analytics competition', 'data hackathon', 'kaggle'],
+
+        'devops': ['cloud competition', 'infrastructure challenge']
     }
     
     relevant_competitions = competition_domains.get(mapped_domain, [])
@@ -560,7 +650,27 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     
     if any(term in jd_lower for term in ['machine learning', 'ml engineer', 'data scientist', 'ai engineer', 'artificial intelligence', 'deep learning']):
         target_domain = 'machine_learning'
-    # ... (other domain checks remain the same) ...
+    elif any(term in jd_lower for term in ['data scientist', 'data analyst', 'business intelligence', 'analytics', 'data engineer']):
+
+        target_domain = 'data_science'
+
+    elif any(term in jd_lower for term in ['devops', 'site reliability', 'infrastructure', 'cloud engineer', 'deployment engineer']):
+
+        target_domain = 'devops'
+
+    elif any(term in jd_lower for term in ['frontend', 'front-end', 'ui developer', 'react developer', 'angular developer', 'vue developer']):
+
+        target_domain = 'frontend_development'
+
+    elif any(term in jd_lower for term in ['backend', 'back-end', 'api developer', 'server developer', 'database developer']):
+
+        target_domain = 'backend_development'
+
+    elif any(term in jd_lower for term in ['software developer', 'full stack', 'web developer', 'application developer']):
+
+        target_domain = 'software_development'
+
+    
     
     for attempt in range(3):
         try:
@@ -597,8 +707,22 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                     else:
                         raise ValueError(f'Missing keys: {missing_keys} in parsed JSON')
                 
-                # ... (data type checks for strengths/weaknesses remain the same) ...
-                
+                # Ensure correct data types
+
+                if not isinstance(data["strengths"], list):
+                    if isinstance(data["strengths"], str):
+                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                    else:
+                        data["strengths"] = ["Shows learning potential and technical curiosity"]
+              
+
+                if not isinstance(data["weaknesses"], list):
+                    if isinstance(data["weaknesses"], str):
+                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
+                    else:
+                        data["weaknesses"] = ["Limited domain-specific experience"]
+     
+
                 # REVISED SCORING LOGIC:
                 # The primary score is now the robust, evidence-based programmatic score.
                 # The LLM's score is used as a reference but doesn't override the evidence.
