@@ -399,76 +399,66 @@ if st.button("Run Analysis"):
         df = pd.DataFrame(all_results)
         st.success("✅ Analysis Complete")
         
-        # Configure pandas display options to show full content
-        pd.set_option('display.max_columns', None)
-        pd.set_option('display.max_colwidth', None)
-        pd.set_option('display.width', None)
-        pd.set_option('display.max_rows', None)
+        # Display each resume as an expandable section for better readability
+        for idx, row in df.iterrows():
+            with st.expander(f"📄 {row['File Name']} - Score: {row['Score']} - {row.get('Job Match', '❌ No')}"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**👤 Personal Information:**")
+                    if row['Name']:
+                        st.write(f"**Name:** {row['Name']}")
+                    if row['Email']:
+                        st.write(f"**Email:** {row['Email']}")
+                    if row['Phone']:
+                        st.write(f"**Phone:** {row['Phone']}")
+                    if row['LinkedIn']:
+                        st.write(f"**LinkedIn:** {row['LinkedIn']}")
+                    if row['GitHub']:
+                        st.write(f"**GitHub:** {row['GitHub']}")
+                    
+                    st.write(f"**Domain:** {row['Domain']}")
+                    st.write(f"**Resume ID:** {row['Resume ID']}")
+                
+                with col2:
+                    st.write("**📊 Evaluation:**")
+                    st.write(f"**Score:** {row['Score']}/100")
+                    if 'Job Match' in row:
+                        st.write(f"**Job Match:** {row['Job Match']}")
+                
+                st.write("**📝 Summary:**")
+                st.write(row['Summary'])
+                
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.write("**✅ Strengths:**")
+                    strengths = row['Strengths'].split('\n') if isinstance(row['Strengths'], str) else row['Strengths']
+                    for strength in strengths:
+                        if strength.strip():
+                            st.write(f"• {strength.strip()}")
+                
+                with col4:
+                    st.write("**⚠️ Weaknesses:**")
+                    weaknesses = row['Weaknesses'].split('\n') if isinstance(row['Weaknesses'], str) else row['Weaknesses']
+                    for weakness in weaknesses:
+                        if weakness.strip():
+                            st.write(f"• {weakness.strip()}")
         
-        # Display dataframe with custom configuration for full content visibility
+        st.write("---")
+        
+        # Also show a compact summary table
+        st.write("### 📋 Summary Table")
+        summary_df = df[['File Name', 'Name', 'Domain', 'Score', 'Job Match']].copy()
         st.dataframe(
-            df, 
+            summary_df,
             use_container_width=True,
-            height=min(600, len(df) * 100 + 100),  # Dynamic height based on number of rows
+            hide_index=True,
             column_config={
-                "Summary": st.column_config.TextColumn(
-                    "Summary",
-                    width="large",
-                    help="Candidate summary"
-                ),
-                "Strengths": st.column_config.TextColumn(
-                    "Strengths", 
-                    width="large",
-                    help="Candidate strengths"
-                ),
-                "Weaknesses": st.column_config.TextColumn(
-                    "Weaknesses",
-                    width="large", 
-                    help="Areas for improvement"
-                ),
-                "Name": st.column_config.TextColumn(
-                    "Name",
-                    width="medium"
-                ),
-                "Email": st.column_config.TextColumn(
-                    "Email",
-                    width="medium"
-                ),
-                "Phone": st.column_config.TextColumn(
-                    "Phone", 
-                    width="small"
-                ),
-                "LinkedIn": st.column_config.LinkColumn(
-                    "LinkedIn",
-                    width="medium",
-                    display_text="Profile"
-                ),
-                "GitHub": st.column_config.LinkColumn(
-                    "GitHub", 
-                    width="medium",
-                    display_text="Repository"
-                ),
-                "Domain": st.column_config.TextColumn(
-                    "Domain",
-                    width="small"
-                ),
-                "Score": st.column_config.NumberColumn(
-                    "Score",
-                    width="small",
-                    format="%d"
-                ),
-                "Job Match": st.column_config.TextColumn(
-                    "Job Match",
-                    width="small"
-                ),
-                "Resume ID": st.column_config.TextColumn(
-                    "Resume ID",
-                    width="medium"
-                ),
-                "File Name": st.column_config.TextColumn(
-                    "File Name", 
-                    width="medium"
-                )
+                "File Name": st.column_config.TextColumn("File Name", width="large"),
+                "Name": st.column_config.TextColumn("Name", width="medium"),
+                "Domain": st.column_config.TextColumn("Domain", width="small"),
+                "Score": st.column_config.NumberColumn("Score", width="small", format="%d"),
+                "Job Match": st.column_config.TextColumn("Job Match", width="small")
             }
         )
 
