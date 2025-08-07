@@ -164,45 +164,41 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
         format_instructions=parser.get_format_instructions()
     )
     response = llm.invoke(input_prompt.to_messages())
+    raw = response.content.strip()  # Get raw string from LLM
+
+    # 👀 Print raw LLM output for debugging
+    print("Raw LLM output:\n", raw)
 
     try:
         # ✅ Primary parsing using LangChain PydanticOutputParser
-        result = parser.parse(response.content)
+        result = parser.parse(raw)
 
         if isinstance(result, ResumeAnalysis):
             result.job_match = "yes" if result.score >= 60 else "no"
             return result
 
     except Exception as e:
-        # 🔁 Fallback on parse failure
-        raw = response.content.strip()
-        st.markdown(f"### ❌ Parsing failed. Reason: `{e}`")
-        st.markdown("#### 🔍 Raw LLM Output:")
-        st.code(raw, language="json")
-
+        # 🔁 Fallback: manual parsing
         try:
-            # 🧠 Try extracting JSON manually
-            match = re.search(r"\{.*?\}", raw, re.DOTALL)
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
                 raise ValueError("No JSON object found in model output.")
 
             json_str = match.group()
             data = json.loads(json_str)
 
-            # ✅ Key validation
+            # ✅ Validate required keys
             required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
             for key in required_keys:
                 if key not in data:
                     raise ValueError(f'Missing key: "{key}" in parsed JSON')
 
-            # 🎯 Job match decision
-            score = int(data.get("score", 0))
-            data["job_match"] = "yes" if score >= 60 else "no"
-
+            data["job_match"] = "yes" if int(data["score"]) >= 60 else "no"
             return ResumeAnalysis(**data)
 
         except Exception as e2:
             raise ValueError(f"⚠️ Evaluation failed: {e2}\n\nRaw output:\n{raw}")
+
 
 
 # ------------------- Streamlit App -------------------
