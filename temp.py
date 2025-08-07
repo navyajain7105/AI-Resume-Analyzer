@@ -212,13 +212,9 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             response = llm.invoke(input_prompt.to_messages())
             raw = response.content.strip()
             
-            # Debug output (show only first 500 chars to avoid clutter) - REMOVE THIS IN PRODUCTION
-            # st.text_area(f"Raw LLM Output (Attempt {attempt + 1})", raw[:500] + "..." if len(raw) > 500 else raw, height=150)
-            
             # If response is too short or obviously malformed, try again
             if len(raw) < 20 or not ('{' in raw and '}' in raw):
                 if attempt < 2:
-                    st.warning(f"Attempt {attempt + 1}: Response too short or malformed, retrying...")
                     continue
                 else:
                     raise ValueError(f"All attempts failed. Last response: '{raw}'")
@@ -226,15 +222,13 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             # Clean the response
             try:
                 cleaned_json = clean_json_response(raw)
-                # st.text_area(f"Cleaned JSON (Attempt {attempt + 1})", cleaned_json, height=150)  # REMOVE THIS IN PRODUCTION
             except Exception as clean_error:
                 if attempt < 2:
-                    st.warning(f"Attempt {attempt + 1}: JSON cleaning failed: {clean_error}")
                     continue
                 else:
                     raise ValueError(f"JSON cleaning failed after all attempts: {clean_error}")
             
-            # Try parsing with manual JSON parsing (skip PydanticOutputParser for now)
+            # Try parsing with manual JSON parsing
             try:
                 data = json.loads(cleaned_json)
                 
@@ -243,7 +237,6 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                 missing_keys = [key for key in required_keys if key not in data]
                 if missing_keys:
                     if attempt < 2:
-                        st.warning(f"Attempt {attempt + 1}: Missing keys: {missing_keys}")
                         continue
                     else:
                         raise ValueError(f'Missing keys: {missing_keys} in parsed JSON')
@@ -281,7 +274,6 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                     if not has_projects or not has_tech_projects:
                         if score > 30:
                             score = min(score, 30)
-                            st.warning(f"Score capped at 30 due to lack of proven technical projects")
                     
                     data["score"] = score
                     
@@ -292,26 +284,21 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                 data["job_match"] = "yes" if data["score"] >= 60 else "no"
                 
                 result = ResumeAnalysis(**data)
-                st.success(f"✅ Successfully evaluated - Score: {result.score}")
                 return result
                 
             except json.JSONDecodeError as json_error:
                 if attempt < 2:
-                    st.warning(f"Attempt {attempt + 1}: JSON parsing failed: {json_error}")
                     continue
                 else:
                     raise ValueError(f"JSON parsing failed after all attempts: {json_error}\n\nFinal cleaned JSON:\n{cleaned_json}")
             
         except Exception as e:
             if attempt < 2:
-                st.warning(f"Attempt {attempt + 1} failed: {e}")
                 continue
             else:
-                st.error(f"All attempts failed. Final error: {e}")
                 break
     
     # Return a default evaluation if all attempts fail
-    st.warning("Returning default evaluation due to parsing failures")
     return ResumeAnalysis(
         domain="unknown",
         summary="Analysis failed due to technical error - multiple parsing attempts unsuccessful",
@@ -379,8 +366,6 @@ if st.button("Run Analysis"):
                 st.error(f"Error analyzing {file.name}: {e}")
 
         if job_desc and resume_docs:
-            st.info("\U0001F50D Matching resumes to job description...")
-
             domain_guess = "devops" if "devops" in job_desc.lower() else (
                            "datascience" if "data" in job_desc.lower() else (
                            "java" if "java" in job_desc.lower() else (
@@ -391,13 +376,11 @@ if st.button("Run Analysis"):
 
             evaluated = {}
             for doc in top_docs:
-                st.info(f"Evaluating: {doc.metadata['file_name']}")
                 try:
                     evaluation = evaluate_resume_vs_jd(doc.page_content, job_desc)
                     evaluated[doc.metadata["resume_id"]] = evaluation
-                    st.success(f"✅ Evaluated: {doc.metadata['file_name']} - Score: {evaluation.score}")
                 except Exception as e:
-                    st.error(f"❌ Evaluation failed for {doc.metadata['file_name']}: {e}")
+                    pass  # Silently continue if evaluation fails
 
             # Update results with evaluations
             for row in all_results:
@@ -415,7 +398,79 @@ if st.button("Run Analysis"):
 
         df = pd.DataFrame(all_results)
         st.success("✅ Analysis Complete")
-        st.dataframe(df, use_container_width=True)
+        
+        # Configure pandas display options to show full content
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.max_colwidth', None)
+        pd.set_option('display.width', None)
+        pd.set_option('display.max_rows', None)
+        
+        # Display dataframe with custom configuration for full content visibility
+        st.dataframe(
+            df, 
+            use_container_width=True,
+            height=min(600, len(df) * 100 + 100),  # Dynamic height based on number of rows
+            column_config={
+                "Summary": st.column_config.TextColumn(
+                    "Summary",
+                    width="large",
+                    help="Candidate summary"
+                ),
+                "Strengths": st.column_config.TextColumn(
+                    "Strengths", 
+                    width="large",
+                    help="Candidate strengths"
+                ),
+                "Weaknesses": st.column_config.TextColumn(
+                    "Weaknesses",
+                    width="large", 
+                    help="Areas for improvement"
+                ),
+                "Name": st.column_config.TextColumn(
+                    "Name",
+                    width="medium"
+                ),
+                "Email": st.column_config.TextColumn(
+                    "Email",
+                    width="medium"
+                ),
+                "Phone": st.column_config.TextColumn(
+                    "Phone", 
+                    width="small"
+                ),
+                "LinkedIn": st.column_config.LinkColumn(
+                    "LinkedIn",
+                    width="medium",
+                    display_text="Profile"
+                ),
+                "GitHub": st.column_config.LinkColumn(
+                    "GitHub", 
+                    width="medium",
+                    display_text="Repository"
+                ),
+                "Domain": st.column_config.TextColumn(
+                    "Domain",
+                    width="small"
+                ),
+                "Score": st.column_config.NumberColumn(
+                    "Score",
+                    width="small",
+                    format="%d"
+                ),
+                "Job Match": st.column_config.TextColumn(
+                    "Job Match",
+                    width="small"
+                ),
+                "Resume ID": st.column_config.TextColumn(
+                    "Resume ID",
+                    width="medium"
+                ),
+                "File Name": st.column_config.TextColumn(
+                    "File Name", 
+                    width="medium"
+                )
+            }
+        )
 
         excel_buffer = BytesIO()
         df.to_excel(excel_buffer, index=False, engine='openpyxl')
