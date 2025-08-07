@@ -84,10 +84,10 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
         Candidate Resume:
         {resume_text}
 
-        Follow this format strictly,Output only this format:
+        Follow this format strictly:
         {format_instructions}
 
-        Return strictly valid JSON starting and ending with curly braces. Do NOT explain anything.
+        Return strictly valid JSON (starting with '{' and ending with '}'). DO NOT explain anything or add extra text.
         """)
 ])
 
@@ -166,11 +166,12 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     response = llm.invoke(input_prompt.to_messages())
     raw = response.content.strip()  # Get raw string from LLM
 
-    # 👀 Print raw LLM output for debugging
-    print("Raw LLM output:\n", raw)
+    # Print raw LLM output for debugging
+    # print("Raw LLM output:\n", raw)
+    st.text_area("Raw LLM Output", raw, height=300)
 
     try:
-        # ✅ Primary parsing using LangChain PydanticOutputParser
+        # Primary parsing using LangChain PydanticOutputParser
         result = parser.parse(raw)
 
         if isinstance(result, ResumeAnalysis):
@@ -178,16 +179,17 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             return result
 
     except Exception as e:
-        # 🔁 Fallback: manual parsing
+        # Fallback: manual parsing
         try:
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            match = re.search(r"\{[\s\S]*\}", raw.strip())
+
             if not match:
                 raise ValueError("No JSON object found in model output.")
 
             json_str = match.group()
             data = json.loads(json_str)
 
-            # ✅ Validate required keys
+            # Validate required keys
             required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
             for key in required_keys:
                 if key not in data:
@@ -197,7 +199,7 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             return ResumeAnalysis(**data)
 
         except Exception as e2:
-            raise ValueError(f"⚠️ Evaluation failed: {e2}\n\nRaw output:\n{raw}")
+            raise ValueError(f"Evaluation failed: {e2}\n\nRaw output:\n{raw}")
 
 
 
