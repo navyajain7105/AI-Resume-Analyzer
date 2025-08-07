@@ -219,9 +219,9 @@ def extract_metadata(text: str):
     
     # LinkedIn extraction
     linkedin_patterns = [
-        r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%?=&]/?",
-        r"linkedin\.com/in/[a-zA-Z0-9\-_%]/?",
-        r"(?i)linkedin[:\s]*https?://[^\s]/",
+        r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%?=&]+/?",
+        r"linkedin\.com/in/[a-zA-Z0-9\-_%]+/?",
+        r"(?i)linkedin[:\s]*https?://[^\s]",
     ]
     
     linkedin = None
