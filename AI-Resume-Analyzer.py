@@ -78,11 +78,18 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
      '  "job_match": "yes" or "no" based on score (yes if score >= 60)\n'
      "}"
     ),
-    ("human", 
-     "Job Description:\n{jd_text}\n\n"
-     "Candidate Resume:\n{resume_text}\n\n"
-     "Return ONLY the JSON response. Do NOT explain anything.Follow this output format:{format_instructions}")
+     ("human", 
+        """Job Description:
+        {jd_text}
 
+        Candidate Resume:
+        {resume_text}
+
+        Follow this format strictly:
+        {format_instructions}
+
+        Do NOT explain anything. Output only the JSON.
+        """)
 ])
 
 load_dotenv()
@@ -152,40 +159,39 @@ def analyze_resume(text, domain):
     return analysis, meta, resume_id
 
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
-    input_prompt = evaluation_prompt.format_prompt(resume_text=resume_text, jd_text=jd_text,format_instructions=parser.get_format_instructions())
+    input_prompt = evaluation_prompt.format_prompt(
+        resume_text=resume_text,
+        jd_text=jd_text,
+        format_instructions=parser.get_format_instructions()
+    )
     response = llm.invoke(input_prompt.to_messages())
-    # raw = output.content.strip()
 
+    # FIRST: Try to parse using PydanticOutputParser
     try:
         result = parser.parse(response.content)
         result.job_match = "yes" if result.score >= 60 else "no"
         return result
     except Exception as e:
-        raise ValueError(f"⚠️ Evaluation failed: {e}\n\nRaw output:\n{response.content}")
+        # If parser fails, attempt to recover JSON manually
+        raw = response.content.strip()
+        try:
+            match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
+            if not match:
+                raise ValueError("No JSON object found in model output.")
 
+            json_str = match.group()
+            json_str = re.sub(r",\s*}", "}", json_str)  # trailing commas
+            json_str = re.sub(r",\s*]", "]", json_str)
 
-    try:
-        # Attempt to extract JSON manually
-        match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
+            data = json.loads(json_str)
+            score = int(data.get("score", 0))
+            data["job_match"] = "yes" if score >= 60 else "no"
 
-        if not match:
-            raise ValueError("No JSON object found in model output.")
-        
-        json_str = match.group()
-        json_str = re.sub(r",\s*}", "}", json_str)  # Remove trailing commas
-        json_str = re.sub(r",\s*]", "]", json_str)
+            return ResumeAnalysis(**data)
 
-        # Load into Python dict
-        data = json.loads(json_str)
+        except Exception as e2:
+            raise ValueError(f"⚠️ Evaluation failed: {e2}\n\nRaw output:\n{raw}")
 
-        # Enforce job_match rule manually
-        score = int(data.get("score", 0))
-        data["job_match"] = "yes" if score >= 60 else "no"
-
-        return ResumeAnalysis(**data)
-
-    except Exception as e:
-        raise ValueError(f"⚠️ Evaluation failed: {e}\n\nRaw output:\n{raw}")
 
 
 
