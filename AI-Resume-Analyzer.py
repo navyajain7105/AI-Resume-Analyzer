@@ -289,7 +289,7 @@ def analyze_resume(text, domain):
         raise ValueError(f"Failed to parse analysis from LLM: {e}\nResponse: {output.content}")
 
     meta = extract_metadata(text)
-    resume_id = f"{domain}_{meta['phone'] or uuid.uuid4().hex[:10]}"
+    resume_id = f"{domain}_{meta['name'] or uuid.uuid4().hex[:10]}"
     return analysis, meta, resume_id
     
 def clean_json_response(raw_response: str) -> str:
