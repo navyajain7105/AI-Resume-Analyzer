@@ -7,8 +7,6 @@ import pandas as pd
 import json
 import streamlit as st
 from io import BytesIO
-import time
-from datetime import datetime
 
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -18,748 +16,459 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from dotenv import load_dotenv
 
-# Disable LangChain tracing for better performance
+
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 os.environ["LANGCHAIN_API_KEY"] = ""
 
-# ================= CONFIGURATION =================
-CHUNK_SIZE = 1500
-CHUNK_OVERLAP = 200
-TOP_K = 10
-MAX_RETRIES = 3
+# ------------------- Config -------------------
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 100
+TOP_K = 5
 
-# ================= ENHANCED SCHEMAS =================
+# ------------------- Schema Definition -------------------
 class ResumeAnalysis(BaseModel):
-    domain: str = Field(..., description="Predicted domain/field of expertise")
-    summary: str = Field(..., description="Comprehensive 3-4 line professional summary")
-    strengths: List[str] = Field(..., description="Key strengths with specific evidence")
-    weaknesses: List[str] = Field(..., description="Areas for improvement with actionable feedback")
-    technical_skills: List[str] = Field(default=[], description="Verified technical skills with evidence")
-    experience_level: str = Field(..., description="Junior/Mid-level/Senior based on actual experience")
-    score: int = Field(..., description="Overall score out of 100 based on objective criteria")
-    recommendations: List[str] = Field(default=[], description="Specific improvement recommendations")
+    domain: str = Field(..., description="Predicted domain of the resume")
+    summary: Optional[str] = Field(..., description="3-line summary")
+    strengths: List[str] = Field(..., description="Resume strengths as a list")
+    weaknesses: List[str] = Field(..., description="Resume weaknesses as a list")
+    score: int = Field(..., description="Overall score out of 100")
+    job_match: Optional[str] = Field(default="no", description="Whether resume matches job requirements")
 
-class JobMatchAnalysis(BaseModel):
-    overall_match: str = Field(..., description="yes/no/partial match assessment")
-    match_percentage: int = Field(..., description="Percentage match with job requirements")
-    matching_skills: List[str] = Field(default=[], description="Skills that match job requirements")
-    missing_skills: List[str] = Field(default=[], description="Critical skills missing for the role")
-    experience_gap: str = Field(..., description="Experience level gap analysis")
-    recommendation: str = Field(..., description="Hiring recommendation with reasoning")
+parser = PydanticOutputParser(pydantic_object=ResumeAnalysis)
 
-# ================= IMPROVED PROMPTS =================
-resume_analysis_prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert resume evaluator with 15+ years of experience in technical recruiting.
+resume_prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a professional resume evaluator."),
+    ("human", """Analyze the following resume and return this JSON:
 
-EVALUATION CRITERIA:
-- Actual work experience and internships (40% weight)
-- Technical projects with measurable impact (30% weight)  
-- Skills backed by evidence/context (20% weight)
-- Education and certifications (10% weight)
-
-SCORING GUIDELINES:
-- 90-100: Exceptional candidate with proven track record
-- 80-89: Strong candidate with solid experience
-- 70-79: Good candidate with relevant experience
-- 60-69: Decent candidate with some gaps
-- 50-59: Weak candidate, major improvements needed
-- Below 50: Not suitable for most technical roles
-
-Be fair but thorough. Focus on substance over fluff."""),
-    
-    ("human", """Analyze this resume comprehensively:
-
-{resume_text}
-
-Provide detailed analysis in this exact JSON format:
 {format_instructions}
 
-Focus on EVIDENCE-BASED evaluation. If claims lack proof, note it in weaknesses.""")
+Resume:
+{resume_text}
+""")
 ])
 
-job_match_prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a technical hiring manager evaluating resume-job fit.
+evaluation_prompt = ChatPromptTemplate.from_messages([
+    ("system", 
+     "You are an extremely strict technical recruiter. You must respond with ONLY valid JSON, no other text.\n\n"
+     "CRITICAL SCORING RULES:\n"
+     "- ONLY actual work experience, internships, and real projects count\n"
+     "- Academic courses, certifications alone = MAX 20 points\n"
+     "- No relevant projects/internships = MAX 30 points\n"
+     "- Skills section without proof = 0 points\n"
+     "- Art/design/non-tech activities = 0 points for tech roles\n\n"
+     "SCORING SCALE:\n"
+     "- 0-30: No relevant experience\n"
+     "- 31-50: Some relevant coursework but no practical experience\n"
+     "- 51-70: Has some projects or internships\n"
+     "- 71-85: Good relevant experience\n"
+     "- 86-100: Excellent match with proven track record\n\n"
+     "BE RUTHLESS. If no real projects exist, score must be under 30."
+    ),
+     ("human", 
+        """Analyze this resume against the job description. Focus ONLY on actual hands-on experience.
 
-MATCHING CRITERIA:
-- Required technical skills coverage
-- Experience level alignment  
-- Domain expertise relevance
-- Project complexity match
-- Growth potential assessment
+Job Description:
+{jd_text}
 
-Be precise and objective. Provide actionable insights."""),
-    
-    ("human", """Compare this resume against the job requirements:
-
-JOB DESCRIPTION:
-{job_description}
-
-RESUME:
+Resume:
 {resume_text}
 
-Provide detailed match analysis in JSON format:
-{format_instructions}
+Look for:
+1. Actual software projects (GitHub, deployed apps, etc.)
+2. Relevant internships or jobs
+3. Real technical implementations
+4. Ignore: courses, skills lists without context, art projects
 
-Focus on specific skills, experience gaps, and concrete recommendations.""")
+Return ONLY this JSON format:
+{{
+  "domain": "predicted domain",
+  "summary": "brief summary focusing on actual experience level",
+  "strengths": ["only real strengths with evidence"],
+  "weaknesses": ["major gaps in experience"],
+  "score": 25
+}}
+
+JSON response:""")
 ])
-
-# ================= ENHANCED PARSERS =================
-resume_parser = PydanticOutputParser(pydantic_object=ResumeAnalysis)
-job_match_parser = PydanticOutputParser(pydantic_object=JobMatchAnalysis)
 
 load_dotenv()
 
-# Initialize LLM with better configuration
-@st.cache_resource
-def get_llm():
-    return ChatGroq(
-        model_name="llama-3.1-70b-versatile",  # More capable model
-        temperature=0.1,  # Lower temperature for more consistent results
-        max_retries=3
-    )
+llm = ChatGroq(model_name="llama-3.1-8b-instant")
 
-llm = get_llm()
+# ------------------------- Helper Functions -------------------------
 
-# ================= ENHANCED HELPER FUNCTIONS =================
-
-def extract_text_robust(file) -> str:
-    """Enhanced text extraction with better error handling"""
-    try:
-        if file.name.endswith(".pdf"):
+def extract_text(file):
+    if file.name.endswith(".pdf"):
+        try:
             doc = fitz.open(stream=file.read(), filetype="pdf")
-            text = ""
-            for page in doc:
-                text += page.get_text()
-                # Also try OCR if text is sparse
-                if len(text.strip()) < 100:
-                    pix = page.get_pixmap()
-                    # Could add OCR here if needed
-            doc.close()
-            return text
-            
-        elif file.name.endswith(".docx"):
+            return "\n".join(page.get_text() for page in doc)
+        except:
+            return ""
+    elif file.name.endswith(".docx"):
+        try:
             doc = docx.Document(file)
-            text = "\n".join([para.text for para in doc.paragraphs])
-            # Also extract text from tables
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        text += "\n" + cell.text
-            return text
-            
-        elif file.name.endswith(".txt"):
+            return "\n".join([para.text for para in doc.paragraphs])
+        except:
+            return ""
+    elif file.name.endswith(".txt"):
+        try:
             return file.read().decode("utf-8")
-            
-    except Exception as e:
-        st.error(f"Error extracting text from {file.name}: {str(e)}")
-        return ""
-    
+        except:
+            return ""
     return ""
 
-def extract_comprehensive_metadata(text: str) -> Dict[str, Any]:
-    """Extract comprehensive metadata from resume text"""
-    metadata = {}
-    
-    # Basic contact info
-    metadata["email"] = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
-    metadata["email"] = metadata["email"].group() if metadata["email"] else None
-    
-    metadata["phone"] = re.search(r"(\+91[-\s]?)?[6-9]\d{9}", text)
-    metadata["phone"] = metadata["phone"].group() if metadata["phone"] else None
-    
-    # Social profiles
-    linkedin_match = re.search(r"(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_/]+", text, re.IGNORECASE)
-    metadata["linkedin"] = linkedin_match.group() if linkedin_match else None
-    
-    github_match = re.search(r"(https?://)?(www\.)?github\.com/[a-zA-Z0-9\-_/]+", text, re.IGNORECASE)
-    metadata["github"] = github_match.group() if github_match else None
-    
-    # Extract name (improved logic)
-    name_patterns = [
-        r"^([A-Z][a-zA-Z\s]+)(?:\n|$)",
-        r"Name\s*[:\-]?\s*([A-Z][a-zA-Z\s]+)",
-        r"([A-Z][A-Z\s]+)(?:\n.*?(?:Engineer|Developer|Analyst|Student))"
-    ]
-    
-    for pattern in name_patterns:
-        name_match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
-        if name_match:
-            metadata["name"] = name_match.group(1).strip()
-            break
-    else:
-        metadata["name"] = None
-    
-    # Extract experience level indicators
-    experience_indicators = {
-        "years_experience": len(re.findall(r"\b(\d+)[\+\-]?\s*years?\s*(?:of\s*)?experience", text, re.IGNORECASE)),
-        "internships": len(re.findall(r"\bintern\b", text, re.IGNORECASE)),
-        "projects": len(re.findall(r"\bproject\b", text, re.IGNORECASE)),
-        "certifications": len(re.findall(r"\bcertificat\w*\b", text, re.IGNORECASE))
-    }
-    
-    metadata.update(experience_indicators)
-    
-    return metadata
+def extract_metadata(text: str):
+    name_match = re.search(r"Name\s*[:\-]?\s*(.+)", text, re.IGNORECASE)
+    phone_match = re.search(r"\b\d{10}\b", text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    linkedin_match = re.search(r"(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_/]+", text)
+    github_match = re.search(r"(https?://)?(www\.)?github\.com/[a-zA-Z0-9\-_/]+", text)
 
-def intelligent_domain_detection(text: str, filename: str) -> str:
-    """Intelligently detect resume domain based on content analysis"""
-    text_lower = text.lower()
-    filename_lower = filename.lower()
-    
-    # Domain keywords with weights
-    domain_keywords = {
-        "data_science": [
-            "machine learning", "data science", "python", "pandas", "numpy", 
-            "tensorflow", "pytorch", "sklearn", "jupyter", "data analysis",
-            "statistics", "regression", "classification", "deep learning", "ai"
-        ],
-        "web_development": [
-            "react", "angular", "vue", "javascript", "html", "css", "node.js",
-            "express", "mongodb", "mysql", "rest api", "frontend", "backend",
-            "full stack", "web development", "bootstrap", "jquery"
-        ],
-        "mobile_development": [
-            "android", "ios", "react native", "flutter", "swift", "kotlin",
-            "mobile app", "app development", "firebase", "xamarin"
-        ],
-        "devops": [
-            "docker", "kubernetes", "jenkins", "ci/cd", "aws", "azure", "gcp",
-            "terraform", "ansible", "devops", "cloud", "microservices", "linux"
-        ],
-        "cybersecurity": [
-            "security", "penetration testing", "ethical hacking", "firewall",
-            "cybersecurity", "vulnerability", "encryption", "infosec"
-        ],
-        "software_engineering": [
-            "software engineer", "software developer", "programming", "algorithms",
-            "data structures", "system design", "architecture", "coding"
-        ]
+    return {
+        "name": name_match.group(1).strip() if name_match else None,
+        "phone": phone_match.group() if phone_match else None,
+        "email": email_match.group() if email_match else None,
+        "linkedin": linkedin_match.group() if linkedin_match else None,
+        "github": github_match.group() if github_match else None,
     }
-    
-    # Calculate scores for each domain
-    domain_scores = {}
-    for domain, keywords in domain_keywords.items():
-        score = sum(1 for keyword in keywords if keyword in text_lower)
-        # Boost score if domain appears in filename
-        if any(domain_word in filename_lower for domain_word in domain.split("_")):
-            score *= 1.5
-        domain_scores[domain] = score
-    
-    # Return the highest scoring domain, or 'general' if no clear match
-    if max(domain_scores.values()) > 2:
-        return max(domain_scores, key=domain_scores.get)
-    else:
-        return "general"
 
-@st.cache_data(ttl=3600)  # Cache embeddings for 1 hour
 def get_embedder():
-    return HuggingFaceEmbeddings(
-        model_name='sentence-transformers/all-MiniLM-L6-v2',
-        model_kwargs={'device': 'cpu'}
-    )
+    return HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
 
-def build_vectorstore_optimized(documents: List[Document]) -> FAISS:
-    """Build optimized vector store with better chunking"""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", " ", ""]
-    )
-    
+def build_vectorstore(documents):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     chunks = splitter.split_documents(documents)
     embedder = get_embedder()
-    
     return FAISS.from_documents(chunks, embedder)
 
-def safe_llm_call(prompt_template, **kwargs) -> Dict[str, Any]:
-    """Safely call LLM with retry logic and error handling"""
-    for attempt in range(MAX_RETRIES):
-        try:
-            input_prompt = prompt_template.format_prompt(**kwargs)
-            response = llm.invoke(input_prompt.to_messages())
-            
-            # Clean and parse JSON response
-            content = response.content.strip()
-            
-            # Remove markdown formatting
-            if content.startswith('```json'):
-                content = content[7:]
-            if content.startswith('```'):
-                content = content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
-            
-            content = content.strip()
-            
-            # Find JSON boundaries
-            start_idx = content.find('{')
-            end_idx = content.rfind('}')
-            
-            if start_idx != -1 and end_idx != -1:
-                json_str = content[start_idx:end_idx+1]
-                return json.loads(json_str)
-            
-        except Exception as e:
-            if attempt == MAX_RETRIES - 1:
-                st.error(f"LLM call failed after {MAX_RETRIES} attempts: {str(e)}")
-                return None
-            time.sleep(1)  # Brief pause before retry
-    
-    return None
+def match_resumes(vectorstore, job_desc, domain_filter, k=TOP_K):
+    results = vectorstore.similarity_search(job_desc, k=15)
+    filtered = [doc for doc in results if doc.metadata.get("domain") == domain_filter.lower()]
+    return filtered[:k]
 
-def analyze_resume_comprehensive(text: str, domain: str) -> tuple:
-    """Comprehensive resume analysis with enhanced AI evaluation"""
-    
-    # Get basic metadata
-    metadata = extract_comprehensive_metadata(text)
-    
-    # AI-powered analysis
-    analysis_data = safe_llm_call(
-        resume_analysis_prompt,
+def analyze_resume(text, domain):
+    input_prompt = resume_prompt.format_prompt(
         resume_text=text,
-        format_instructions=resume_parser.get_format_instructions()
+        format_instructions=parser.get_format_instructions()
     )
+    output = llm.invoke(input_prompt.to_messages())
+    analysis = parser.parse(output.content)
+    meta = extract_metadata(text)
+    resume_id = f"{domain}_{meta['phone'] or uuid.uuid4().hex[:10]}"
+    return analysis, meta, resume_id
+
+def clean_json_response(raw_response: str) -> str:
+    """Clean and extract JSON from LLM response"""
+    # Remove common prefixes and markdown formatting
+    raw_response = raw_response.strip()
     
-    if analysis_data:
+    # Remove markdown code blocks if present
+    if raw_response.startswith('```json'):
+        raw_response = raw_response[7:]
+    if raw_response.startswith('```'):
+        raw_response = raw_response[3:]
+    if raw_response.endswith('```'):
+        raw_response = raw_response[:-3]
+    
+    raw_response = raw_response.strip()
+    
+    # Find JSON object boundaries
+    start = raw_response.find('{')
+    if start == -1:
+        raise ValueError(f"No opening brace found in response: '{raw_response[:100]}...'")
+    
+    # Find the matching closing brace by counting braces
+    brace_count = 0
+    end = -1
+    for i in range(start, len(raw_response)):
+        if raw_response[i] == '{':
+            brace_count += 1
+        elif raw_response[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end = i
+                break
+    
+    if end == -1:
+        raise ValueError(f"No matching closing brace found. Response starts with: '{raw_response[:200]}...'")
+    
+    json_str = raw_response[start:end+1]
+    return json_str
+
+def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
+    """Evaluate resume against job description with improved error handling"""
+    
+    # Try multiple approaches to get a valid response
+    for attempt in range(3):
         try:
-            analysis = ResumeAnalysis(**analysis_data)
-        except Exception as e:
-            # Fallback analysis if parsing fails
-            analysis = ResumeAnalysis(
-                domain=domain,
-                summary="Analysis parsing failed - manual review recommended",
-                strengths=["Unable to parse detailed analysis"],
-                weaknesses=["Technical parsing error occurred"],
-                technical_skills=[],
-                experience_level="Unknown",
-                score=50,
-                recommendations=["Manual review recommended due to parsing error"]
+            input_prompt = evaluation_prompt.format_prompt(
+                resume_text=resume_text,
+                jd_text=jd_text
             )
-    else:
-        # Fallback analysis
-        analysis = ResumeAnalysis(
-            domain=domain,
-            summary="AI analysis failed - manual review needed",
-            strengths=["Analysis could not be completed"],
-            weaknesses=["AI evaluation failed"],
-            technical_skills=[],
-            experience_level="Unknown",
-            score=30,
-            recommendations=["Retry analysis or manual review"]
-        )
-    
-    # Generate unique resume ID
-    resume_id = f"{domain}_{metadata['phone'] or uuid.uuid4().hex[:10]}"
-    
-    return analysis, metadata, resume_id
-
-def evaluate_job_match(resume_text: str, job_description: str) -> JobMatchAnalysis:
-    """Enhanced job matching with detailed analysis"""
-    
-    match_data = safe_llm_call(
-        job_match_prompt,
-        resume_text=resume_text,
-        job_description=job_description,
-        format_instructions=job_match_parser.get_format_instructions()
-    )
-    
-    if match_data:
-        try:
-            return JobMatchAnalysis(**match_data)
-        except Exception:
-            pass
-    
-    # Fallback analysis
-    return JobMatchAnalysis(
-        overall_match="no",
-        match_percentage=20,
-        matching_skills=[],
-        missing_skills=["Analysis failed - unable to determine skill gaps"],
-        experience_gap="Unable to assess",
-        recommendation="Manual review required due to analysis failure"
-    )
-
-def match_resumes_advanced(vectorstore: FAISS, job_desc: str, domain_filter: str = None, k: int = TOP_K) -> List[Document]:
-    """Advanced resume matching with domain filtering"""
-    
-    # Get initial matches
-    results = vectorstore.similarity_search(job_desc, k=k*2)  # Get more results for filtering
-    
-    if domain_filter and domain_filter != "general":
-        # Filter by domain
-        filtered_results = [
-            doc for doc in results 
-            if doc.metadata.get("domain", "").lower() == domain_filter.lower()
-        ]
-        return filtered_results[:k]
-    
-    return results[:k]
-
-# ================= STREAMLIT UI ENHANCEMENTS =================
-
-st.set_page_config(
-    page_title="AI Resume Analyzer Pro",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better UI
-st.markdown("""
-<style>
-.main-header {
-    text-align: center;
-    color: #1f77b4;
-    font-size: 2.5rem;
-    margin-bottom: 2rem;
-}
-.metric-card {
-    background: #f0f2f6;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border-left: 4px solid #1f77b4;
-    margin: 0.5rem 0;
-}
-.score-excellent { color: #28a745; font-weight: bold; }
-.score-good { color: #17a2b8; font-weight: bold; }
-.score-fair { color: #ffc107; font-weight: bold; }
-.score-poor { color: #dc3545; font-weight: bold; }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown('<h1 class="main-header">🎯 AI Resume Analyzer Pro</h1>', unsafe_allow_html=True)
-
-# Sidebar configuration
-with st.sidebar:
-    st.header("⚙️ Configuration")
-    
-    analysis_mode = st.selectbox(
-        "Analysis Mode",
-        ["Basic Analysis", "Job Matching", "Batch Processing"],
-        help="Choose the type of analysis to perform"
-    )
-    
-    if analysis_mode == "Job Matching":
-        domain_filter = st.selectbox(
-            "Filter by Domain",
-            ["All Domains", "Data Science", "Web Development", "Mobile Development", 
-             "DevOps", "Cybersecurity", "Software Engineering"],
-            help="Filter resumes by technical domain"
-        )
-    
-    max_resumes = st.slider("Max Resumes to Process", 1, 50, 10)
-    
-    st.markdown("---")
-    st.markdown("### 📋 Analysis Criteria")
-    st.markdown("""
-    - **Work Experience**: 40%
-    - **Technical Projects**: 30%
-    - **Skills & Evidence**: 20%
-    - **Education**: 10%
-    """)
-
-# Main interface
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    uploaded_files = st.file_uploader(
-        "📁 Upload Resume Files",
-        type=["pdf", "docx", "txt"],
-        accept_multiple_files=True,
-        help="Upload multiple resume files for batch analysis"
-    )
-
-with col2:
-    if analysis_mode in ["Job Matching", "Batch Processing"]:
-        job_desc = st.text_area(
-            "📝 Job Description",
-            height=200,
-            help="Paste the complete job description for matching analysis"
-        )
-
-# Analysis execution
-if st.button("🚀 Start Analysis", type="primary"):
-    if not uploaded_files:
-        st.warning("⚠️ Please upload at least one resume file.")
-    elif analysis_mode == "Job Matching" and not job_desc.strip():
-        st.warning("⚠️ Please provide a job description for matching analysis.")
-    else:
-        # Progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        all_results = []
-        resume_documents = []
-        
-        total_files = min(len(uploaded_files), max_resumes)
-        
-        # Process each resume
-        for idx, file in enumerate(uploaded_files[:max_resumes]):
-            progress = (idx + 1) / total_files
-            progress_bar.progress(progress)
-            status_text.text(f"Processing {file.name}... ({idx + 1}/{total_files})")
             
-            # Extract text
-            text = extract_text_robust(file)
-            if not text.strip():
-                st.warning(f"⚠️ Could not extract text from {file.name}")
-                continue
+            response = llm.invoke(input_prompt.to_messages())
+            raw = response.content.strip()
             
-            # Detect domain
-            domain = intelligent_domain_detection(text, file.name)
+            # If response is too short or obviously malformed, try again
+            if len(raw) < 20 or not ('{' in raw and '}' in raw):
+                if attempt < 2:
+                    continue
+                else:
+                    raise ValueError(f"All attempts failed. Last response: '{raw}'")
             
+            # Clean the response
             try:
-                # Comprehensive analysis
-                analysis, metadata, resume_id = analyze_resume_comprehensive(text, domain)
+                cleaned_json = clean_json_response(raw)
+            except Exception as clean_error:
+                if attempt < 2:
+                    continue
+                else:
+                    raise ValueError(f"JSON cleaning failed after all attempts: {clean_error}")
+            
+            # Try parsing with manual JSON parsing
+            try:
+                data = json.loads(cleaned_json)
                 
-                # Create document for vector store
+                # Validate required keys
+                required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
+                missing_keys = [key for key in required_keys if key not in data]
+                if missing_keys:
+                    if attempt < 2:
+                        continue
+                    else:
+                        raise ValueError(f'Missing keys: {missing_keys} in parsed JSON')
+                
+                # Ensure correct data types
+                if not isinstance(data["strengths"], list):
+                    if isinstance(data["strengths"], str):
+                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                    else:
+                        data["strengths"] = ["Unable to parse strengths"]
+                
+                if not isinstance(data["weaknesses"], list):
+                    if isinstance(data["weaknesses"], str):
+                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
+                    else:
+                        data["weaknesses"] = ["Unable to parse weaknesses"]
+                
+                # Ensure score is integer and enforce strict limits
+                try:
+                    score = int(float(data["score"]))
+                    
+                    # Additional validation - if score seems too high, cap it
+                    resume_lower = resume_text.lower()
+                    has_projects = any(keyword in resume_lower for keyword in [
+                        'github', 'deployed', 'built', 'developed', 'implemented', 
+                        'created', 'project', 'internship', 'work experience'
+                    ])
+                    
+                    has_tech_projects = any(keyword in resume_lower for keyword in [
+                        'python', 'java', 'javascript', 'react', 'node', 'sql', 
+                        'database', 'api', 'web development', 'software', 'programming'
+                    ])
+                    
+                    # If no clear technical projects found, cap score at 30
+                    if not has_projects or not has_tech_projects:
+                        if score > 30:
+                            score = min(score, 30)
+                    
+                    data["score"] = score
+                    
+                except (ValueError, TypeError):
+                    data["score"] = 20  # Default low score for parsing errors
+                
+                # Add job match determination
+                data["job_match"] = "yes" if data["score"] >= 60 else "no"
+                
+                result = ResumeAnalysis(**data)
+                return result
+                
+            except json.JSONDecodeError as json_error:
+                if attempt < 2:
+                    continue
+                else:
+                    raise ValueError(f"JSON parsing failed after all attempts: {json_error}\n\nFinal cleaned JSON:\n{cleaned_json}")
+            
+        except Exception as e:
+            if attempt < 2:
+                continue
+            else:
+                break
+    
+    # Return a default evaluation if all attempts fail
+    return ResumeAnalysis(
+        domain="unknown",
+        summary="Analysis failed due to technical error - multiple parsing attempts unsuccessful",
+        strengths=["Unable to evaluate due to technical error"],
+        weaknesses=["Technical evaluation error occurred", "Unable to assess actual experience"],
+        score=10,  # Very low default score
+        job_match="no"
+    )
+
+# ------------------- Streamlit App -------------------
+st.set_page_config(page_title="AI Resume Analyzer")
+st.title("Resume Analyzer + Matcher + Excel Export")
+
+uploaded_files = st.file_uploader("Upload Resumes", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+job_desc = st.text_area("Paste Job Description (optional)")
+
+if st.button("Run Analysis"):
+    if not uploaded_files:
+        st.warning("Please upload resumes.")
+    else:
+        st.info("Analyzing resumes...")
+        all_results = []
+        resume_docs = []
+
+        for file in uploaded_files:
+            text = extract_text(file)
+            if not text.strip():
+                st.warning(f"Could not extract text from: {file.name}")
+                continue
+
+            inferred_domain = "devops" if "devops" in file.name.lower() else (
+                              "datascience" if "ds" in file.name.lower() else (
+                              "java" if "java" in file.name.lower() else (
+                              "fullstack" if "full" in file.name.lower() else "general")))
+
+            try:
+                analysis, meta, resume_id = analyze_resume(text, inferred_domain)
                 doc = Document(
                     page_content=text,
                     metadata={
                         "resume_id": resume_id,
                         "file_name": file.name,
-                        "domain": domain,
-                        **metadata
+                        "domain": inferred_domain,
+                        **meta
                     }
                 )
-                resume_documents.append(doc)
-                
-                # Prepare result data
-                result = {
+                resume_docs.append(doc)
+
+                all_results.append({
                     "Resume ID": resume_id,
                     "File Name": file.name,
-                    "Name": metadata.get("name", "N/A"),
-                    "Phone": metadata.get("phone", "N/A"),
-                    "Email": metadata.get("email", "N/A"),
-                    "LinkedIn": metadata.get("linkedin", "N/A"),
-                    "GitHub": metadata.get("github", "N/A"),
-                    "Domain": domain,
-                    "Experience Level": analysis.experience_level,
+                    "Name": meta["name"],
+                    "Phone": meta["phone"],
+                    "Email": meta["email"],
+                    "LinkedIn": meta["linkedin"],
+                    "GitHub": meta["github"],
+                    "Domain": inferred_domain,
                     "Summary": analysis.summary,
-                    "Strengths": analysis.strengths,
-                    "Weaknesses": analysis.weaknesses,
-                    "Technical Skills": analysis.technical_skills,
+                    "Strengths": "\n".join(analysis.strengths),
+                    "Weaknesses": "\n".join(analysis.weaknesses),
                     "Score": analysis.score,
-                    "Recommendations": analysis.recommendations
-                }
-                
-                # Job matching analysis
-                if analysis_mode == "Job Matching" and job_desc.strip():
-                    job_match = evaluate_job_match(text, job_desc)
-                    result.update({
-                        "Job Match": job_match.overall_match,
-                        "Match Percentage": job_match.match_percentage,
-                        "Matching Skills": job_match.matching_skills,
-                        "Missing Skills": job_match.missing_skills,
-                        "Experience Gap": job_match.experience_gap,
-                        "Hiring Recommendation": job_match.recommendation
-                    })
-                
-                all_results.append(result)
-                
+                })
+
             except Exception as e:
-                st.error(f"❌ Error analyzing {file.name}: {str(e)}")
-                continue
+                st.error(f"Error analyzing {file.name}: {e}")
+
+        if job_desc and resume_docs:
+            domain_guess = "devops" if "devops" in job_desc.lower() else (
+                           "datascience" if "data" in job_desc.lower() else (
+                           "java" if "java" in job_desc.lower() else (
+                           "fullstack" if "full" in job_desc.lower() else "general")))
+
+            vectorstore = build_vectorstore(resume_docs)
+            top_docs = match_resumes(vectorstore, job_desc, domain_guess, k=TOP_K)
+
+            evaluated = {}
+            for doc in top_docs:
+                try:
+                    evaluation = evaluate_resume_vs_jd(doc.page_content, job_desc)
+                    evaluated[doc.metadata["resume_id"]] = evaluation
+                except Exception as e:
+                    pass  # Silently continue if evaluation fails
+
+            # Update results with evaluations
+            for row in all_results:
+                rid = row["Resume ID"]
+                evaluation = evaluated.get(rid)
+
+                if evaluation:
+                    row["Strengths"] = "\n".join(evaluation.strengths)
+                    row["Weaknesses"] = "\n".join(evaluation.weaknesses)
+                    row["Score"] = evaluation.score
+                    row["Summary"] = evaluation.summary
+                    row["Job Match"] = "✅ Yes" if evaluation.score >= 60 else "❌ No"
+                else:
+                    row["Job Match"] = "❌ No"
+
+        df = pd.DataFrame(all_results)
+        st.success("✅ Analysis Complete")
         
-        # Clear progress indicators
-        progress_bar.empty()
-        status_text.empty()
-        
-        if all_results:
-            st.success(f"✅ Successfully analyzed {len(all_results)} resumes!")
-            
-            # Display results
-            st.markdown("## 📊 Analysis Results")
-            
-            # Summary statistics
-            if len(all_results) > 1:
-                col1, col2, col3, col4 = st.columns(4)
-                
-                scores = [r["Score"] for r in all_results]
-                avg_score = sum(scores) / len(scores)
+        # Display each resume as an expandable section for better readability
+        for idx, row in df.iterrows():
+            with st.expander(f"📄 {row['File Name']} - Score: {row['Score']} - {row.get('Job Match', '❌ No')}"):
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.metric("Total Resumes", len(all_results))
+                    st.write("**👤 Personal Information:**")
+                    if row['Name']:
+                        st.write(f"**Name:** {row['Name']}")
+                    if row['Email']:
+                        st.write(f"**Email:** {row['Email']}")
+                    if row['Phone']:
+                        st.write(f"**Phone:** {row['Phone']}")
+                    if row['LinkedIn']:
+                        st.write(f"**LinkedIn:** {row['LinkedIn']}")
+                    if row['GitHub']:
+                        st.write(f"**GitHub:** {row['GitHub']}")
+                    
+                    st.write(f"**Domain:** {row['Domain']}")
+                    st.write(f"**Resume ID:** {row['Resume ID']}")
+                
                 with col2:
-                    st.metric("Average Score", f"{avg_score:.1f}/100")
+                    st.write("**📊 Evaluation:**")
+                    st.write(f"**Score:** {row['Score']}/100")
+                    if 'Job Match' in row:
+                        st.write(f"**Job Match:** {row['Job Match']}")
+                
+                st.write("**📝 Summary:**")
+                st.write(row['Summary'])
+                
+                col3, col4 = st.columns(2)
                 with col3:
-                    excellent_count = sum(1 for s in scores if s >= 80)
-                    st.metric("Excellent (80+)", excellent_count)
+                    st.write("**✅ Strengths:**")
+                    strengths = row['Strengths'].split('\n') if isinstance(row['Strengths'], str) else row['Strengths']
+                    for strength in strengths:
+                        if strength.strip():
+                            st.write(f"• {strength.strip()}")
+                
                 with col4:
-                    if analysis_mode == "Job Matching":
-                        good_matches = sum(1 for r in all_results if r.get("Match Percentage", 0) >= 70)
-                        st.metric("Good Matches (70%+)", good_matches)
-            
-            # Individual resume results
-            for idx, result in enumerate(all_results):
-                score = result["Score"]
-                score_class = ("score-excellent" if score >= 80 else
-                              "score-good" if score >= 65 else
-                              "score-fair" if score >= 50 else "score-poor")
-                
-                match_info = ""
-                if analysis_mode == "Job Matching" and "Match Percentage" in result:
-                    match_info = f" | Match: {result['Match Percentage']}%"
-                
-                with st.expander(f"📄 {result['File Name']} - Score: {score}/100{match_info}", expanded=(idx < 3)):
-                    col1, col2 = st.columns([1, 1])
-                    
-                    with col1:
-                        st.markdown("### 👤 Personal Information")
-                        info_data = {
-                            "Name": result["Name"],
-                            "Email": result["Email"],
-                            "Phone": result["Phone"],
-                            "Domain": result["Domain"],
-                            "Experience Level": result["Experience Level"]
-                        }
-                        
-                        for key, value in info_data.items():
-                            if value and value != "N/A":
-                                st.write(f"**{key}:** {value}")
-                        
-                        if result["LinkedIn"] != "N/A":
-                            st.write(f"**LinkedIn:** [Profile]({result['LinkedIn']})")
-                        if result["GitHub"] != "N/A":
-                            st.write(f"**GitHub:** [Profile]({result['GitHub']})")
-                    
-                    with col2:
-                        st.markdown("### 📊 Evaluation")
-                        st.markdown(f'<p class="{score_class}">Overall Score: {score}/100</p>', 
-                                  unsafe_allow_html=True)
-                        
-                        if analysis_mode == "Job Matching" and "Match Percentage" in result:
-                            st.write(f"**Job Match:** {result['Job Match'].title()}")
-                            st.write(f"**Match Percentage:** {result['Match Percentage']}%")
-                    
-                    # Summary
-                    st.markdown("### 📝 Summary")
-                    st.write(result["Summary"])
-                    
-                    # Strengths and Weaknesses
-                    col3, col4 = st.columns(2)
-                    
-                    with col3:
-                        st.markdown("### ✅ Strengths")
-                        for strength in result["Strengths"]:
-                            st.write(f"• {strength}")
-                    
-                    with col4:
-                        st.markdown("### ⚠️ Areas for Improvement")
-                        for weakness in result["Weaknesses"]:
-                            st.write(f"• {weakness}")
-                    
-                    # Technical skills
-                    if result["Technical Skills"]:
-                        st.markdown("### 🛠️ Technical Skills")
-                        skills_text = " | ".join(result["Technical Skills"])
-                        st.write(skills_text)
-                    
-                    # Job matching details
-                    if analysis_mode == "Job Matching" and "Matching Skills" in result:
-                        col5, col6 = st.columns(2)
-                        
-                        with col5:
-                            st.markdown("### ✅ Matching Skills")
-                            for skill in result["Matching Skills"]:
-                                st.write(f"• {skill}")
-                        
-                        with col6:
-                            st.markdown("### ❌ Missing Skills")
-                            for skill in result["Missing Skills"]:
-                                st.write(f"• {skill}")
-                        
-                        st.markdown("### 💡 Hiring Recommendation")
-                        st.write(result["Hiring Recommendation"])
-                    
-                    # Recommendations
-                    if result["Recommendations"]:
-                        st.markdown("### 🎯 Improvement Recommendations")
-                        for rec in result["Recommendations"]:
-                            st.write(f"• {rec}")
-            
-            # Export functionality
-            st.markdown("---")
-            st.markdown("## 📥 Export Results")
-            
-            # Prepare DataFrame for export
-            export_data = []
-            for result in all_results:
-                export_row = {
-                    "Resume_ID": result["Resume ID"],
-                    "File_Name": result["File Name"],
-                    "Name": result["Name"],
-                    "Email": result["Email"],
-                    "Phone": result["Phone"],
-                    "LinkedIn": result["LinkedIn"],
-                    "GitHub": result["GitHub"],
-                    "Domain": result["Domain"],
-                    "Experience_Level": result["Experience Level"],
-                    "Score": result["Score"],
-                    "Summary": result["Summary"],
-                    "Strengths": " | ".join(result["Strengths"]),
-                    "Weaknesses": " | ".join(result["Weaknesses"]),
-                    "Technical_Skills": " | ".join(result["Technical Skills"]),
-                    "Recommendations": " | ".join(result["Recommendations"])
-                }
-                
-                if analysis_mode == "Job Matching" and "Match Percentage" in result:
-                    export_row.update({
-                        "Job_Match": result["Job Match"],
-                        "Match_Percentage": result["Match Percentage"],
-                        "Matching_Skills": " | ".join(result["Matching Skills"]),
-                        "Missing_Skills": " | ".join(result["Missing Skills"]),
-                        "Experience_Gap": result["Experience Gap"],
-                        "Hiring_Recommendation": result["Hiring Recommendation"]
-                    })
-                
-                export_data.append(export_row)
-            
-            df = pd.DataFrame(export_data)
-            
-            # Create Excel file
-            excel_buffer = BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Resume_Analysis', index=False)
-                
-                # Add summary sheet if multiple resumes
-                if len(all_results) > 1:
-                    summary_data = {
-                        "Metric": ["Total Resumes", "Average Score", "Excellent (80+)", "Good (65-79)", "Fair (50-64)", "Poor (<50)"],
-                        "Value": [
-                            len(all_results),
-                            f"{avg_score:.1f}",
-                            sum(1 for s in scores if s >= 80),
-                            sum(1 for s in scores if 65 <= s < 80),
-                            sum(1 for s in scores if 50 <= s < 65),
-                            sum(1 for s in scores if s < 50)
-                        ]
-                    }
-                    
-                    summary_df = pd.DataFrame(summary_data)
-                    summary_df.to_excel(writer, sheet_name='Summary', index=False)
-            
-            excel_buffer.seek(0)
-            
-            st.download_button(
-                label="📊 Download Detailed Excel Report",
-                data=excel_buffer,
-                file_name=f"resume_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-        else:
-            st.error("❌ No resumes were successfully processed. Please check your files and try again.")
+                    st.write("**⚠️ Weaknesses:**")
+                    weaknesses = row['Weaknesses'].split('\n') if isinstance(row['Weaknesses'], str) else row['Weaknesses']
+                    for weakness in weaknesses:
+                        if weakness.strip():
+                            st.write(f"• {weakness.strip()}")
+        
+        st.write("---")
+        
+        # Also show a compact summary table
+        st.write("### 📋 Summary Table")
+        summary_df = df[['File Name', 'Name', 'Domain', 'Score', 'Job Match']].copy()
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "File Name": st.column_config.TextColumn("File Name", width="large"),
+                "Name": st.column_config.TextColumn("Name", width="medium"),
+                "Domain": st.column_config.TextColumn("Domain", width="small"),
+                "Score": st.column_config.NumberColumn("Score", width="small", format="%d"),
+                "Job Match": st.column_config.TextColumn("Job Match", width="small")
+            }
+        )
 
-# Footer
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center; color: #666;'>"
-    "Built with ❤️ using Streamlit & LangChain | "
-    "AI-Powered Resume Analysis"
-    "</div>",
-    unsafe_allow_html=True
-)
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        excel_buffer.seek(0)
+
+        st.download_button(
+            label="📥 Download as Excel",
+            data=excel_buffer,
+            file_name="resume_analysis.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
