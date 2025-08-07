@@ -20,8 +20,7 @@ from typing import List, Optional
 from dotenv import load_dotenv
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
-# Make sure to set your Groq API key in your environment variables or replace ""
-os.environ["GROQ_API_KEY"] = "" 
+os.environ["LANGCHAIN_API_KEY"] = ""
 
 # ------------------- Config -------------------
 CHUNK_SIZE = 1000
@@ -80,7 +79,7 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
      "BE REALISTIC: Don't inflate scores. Better to be conservative and accurate."
     ),
      ("human", 
-       """Analyze this resume against the job description with STRICT domain relevance.
+        """Analyze this resume against the job description with STRICT domain relevance.
 
 Job Description:
 {jd_text}
@@ -121,7 +120,6 @@ JSON response:""")
 
 load_dotenv()
 
-# Ensure you have set the GROQ_API_KEY environment variable
 llm = ChatGroq(model_name="llama-3.1-8b-instant")
 
 # ------------------------- Helper Functions -------------------------
@@ -129,14 +127,8 @@ llm = ChatGroq(model_name="llama-3.1-8b-instant")
 def extract_text(file):
     if file.name.endswith(".pdf"):
         try:
-            # Clean up text by joining lines that might have been split
             doc = fitz.open(stream=file.read(), filetype="pdf")
-            full_text = ""
-            for page in doc:
-                full_text += page.get_text()
-            # A simple way to join hyphenated words split across lines
-            full_text = re.sub(r"-\n", "", full_text)
-            return full_text
+            return "\n".join(page.get_text() for page in doc)
         except:
             return ""
     elif file.name.endswith(".docx"):
@@ -154,9 +146,6 @@ def extract_text(file):
 
 def extract_metadata(text: str):
     """Improved metadata extraction with better regex patterns"""
-    # Join lines to handle multi-line contact info before regex matching
-    cleaned_text = re.sub(r'\s*\n\s*', ' ', text)
-
     # Name extraction - look for patterns after common indicators
     name_patterns = [
         r"(?i)^([A-Z][a-z]+ [A-Z][a-z]+)",  # First line capitalized names
@@ -165,7 +154,6 @@ def extract_metadata(text: str):
     ]
     
     name = None
-    # Use original text for name finding as it relies on line structure
     for pattern in name_patterns:
         name_match = re.search(pattern, text, re.MULTILINE)
         if name_match:
@@ -184,22 +172,23 @@ def extract_metadata(text: str):
     
     phone = None
     for pattern in phone_patterns:
-        phone_match = re.search(pattern, cleaned_text)
+        phone_match = re.search(pattern, text)
         if phone_match:
             phone = phone_match.group().strip()
             break
     
     # Email extraction
-    email_match = re.search(r"[\w\.\-]+@[\w\.\-]+\.\w+", cleaned_text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
     
     # LinkedIn extraction - improved pattern
     linkedin_patterns = [
-        r"(https?://)?(www\.)?linkedin\.com/in/[\w\-\/]+",
+        r"(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_/?=&]+",
+        r"linkedin\.com/in/[a-zA-Z0-9\-_]+",
     ]
     
     linkedin = None
     for pattern in linkedin_patterns:
-        linkedin_match = re.search(pattern, cleaned_text, re.IGNORECASE)
+        linkedin_match = re.search(pattern, text, re.IGNORECASE)
         if linkedin_match:
             linkedin_url = linkedin_match.group().strip()
             # Ensure it's a proper URL
@@ -210,12 +199,13 @@ def extract_metadata(text: str):
     
     # GitHub extraction - improved pattern
     github_patterns = [
-        r"(https?://)?(www\.)?github\.com/[\w\-\/]+",
+        r"(https?://)?(www\.)?github\.com/[a-zA-Z0-9\-_/?=&]+",
+        r"github\.com/[a-zA-Z0-9\-_]+",
     ]
     
     github = None
     for pattern in github_patterns:
-        github_match = re.search(pattern, cleaned_text, re.IGNORECASE)
+        github_match = re.search(pattern, text, re.IGNORECASE)
         if github_match:
             github_url = github_match.group().strip()
             # Ensure it's a proper URL
@@ -300,7 +290,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     # PROVEN WORK INDICATORS - These carry the most weight
     proven_work_indicators = {
         'projects': {
-            'strong_evidence': ['[github.com/](https://github.com/)', 'deployed', 'live demo', 'production', 'website:', 'app store', 'play store'],
+            'strong_evidence': ['github.com/', 'deployed', 'live demo', 'production', 'website:', 'app store', 'play store'],
             'medium_evidence': ['project', 'developed', 'built', 'created', 'implemented', 'designed'],
             'weak_evidence': ['familiar with', 'knowledge of', 'learned']
         },
@@ -321,20 +311,20 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     
     # Strong evidence of work (40% weight)
     strong_work_count = sum(1 for category in proven_work_indicators.values() 
-                            for indicator in category['strong_evidence'] 
-                            if indicator in resume_lower)
+                           for indicator in category['strong_evidence'] 
+                           if indicator in resume_lower)
     proven_score += min(40, strong_work_count * 8)
     
     # Medium evidence of work (20% weight)
     medium_work_count = sum(1 for category in proven_work_indicators.values() 
-                            for indicator in category['medium_evidence'] 
-                            if indicator in resume_lower)
+                           for indicator in category['medium_evidence'] 
+                           if indicator in resume_lower)
     proven_score += min(20, medium_work_count * 3)
     
     # Weak evidence (10% weight)
     weak_work_count = sum(1 for category in proven_work_indicators.values() 
-                          for indicator in category['weak_evidence'] 
-                          if indicator in resume_lower)
+                         for indicator in category['weak_evidence'] 
+                         if indicator in resume_lower)
     proven_score += min(10, weak_work_count * 2)
     
     # DOMAIN-SPECIFIC IMPLEMENTATION EVIDENCE (20% of total)
@@ -345,7 +335,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
         'machine_learning': [
             'model accuracy', 'dataset', 'training', 'prediction', 'classification accuracy',
             'implemented neural network', 'built ml model', 'data preprocessing',
-            'model deployment', 'tensorflow implementation', 'pytorch model', 'llm', 'langchain'
+            'model deployment', 'tensorflow implementation', 'pytorch model'
         ],
         'software_development': [
             'rest api', 'database connection', 'user authentication', 'responsive design',
@@ -378,7 +368,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     }
     
     mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
-    relevant_implementations = implementation_evidence.get(mapped_domain, [])
+    relevant_implementations = implementation_evidence.get(mapped_domain, implementation_evidence['software_development'])
     
     implementation_count = sum(1 for impl in relevant_implementations if impl in resume_lower)
     domain_implementation_score = min(20, implementation_count * 4)
@@ -388,8 +378,8 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     
     # Only count skills if they appear in context of actual work/projects
     skill_context_patterns = [
-        r'used\s+([\w\.]+)', r'implemented\s+([\w\.]+)', r'built\s+with\s+([\w\.]+)',
-        r'developed\s+using\s+([\w\.]+)', r'created\s+with\s+([\w\.]+)'
+        r'used\s+(\w+)', r'implemented\s+(\w+)', r'built\s+with\s+(\w+)',
+        r'developed\s+using\s+(\w+)', r'created\s+with\s+(\w+)'
     ]
     
     domain_skills = {
@@ -399,7 +389,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
         'data_science': ['python', 'r', 'sql', 'tableau', 'pandas', 'matplotlib']
     }
     
-    relevant_skills = domain_skills.get(mapped_domain, [])
+    relevant_skills = domain_skills.get(mapped_domain, domain_skills['software_development'])
     
     # Count skills only when mentioned in context of actual work
     contextual_skills = 0
@@ -439,38 +429,17 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     """Evaluate resume against job description with realistic scoring"""
     
-    # *** CHANGED LOGIC FOR DOMAIN DETECTION ***
-    target_domain = 'general' 
-    jd_lower = jd_text.lower() if jd_text else ""
-    resume_lower = resume_text.lower()
-
-    # 1. Infer from Job Description (Highest Priority)
-    if jd_text:
-        if any(term in jd_lower for term in ['machine learning', 'ml engineer', 'data scientist', 'ai']):
-            target_domain = 'machine_learning'
-        elif any(term in jd_lower for term in ['software developer', 'full stack', 'backend', 'frontend', 'web developer']):
-            target_domain = 'software_development'
-        elif any(term in jd_lower for term in ['devops', 'site reliability', 'infrastructure', 'deployment']):
-            target_domain = 'devops'
-
-    # 2. If JD gives no signal, infer from Resume content (Fallback)
-    if target_domain == 'general':
-        domain_scores = {
-            'machine_learning': sum(1 for term in ['machine learning', 'ml', 'ai', 'llm', 'tensorflow', 'pytorch', 'scikit-learn', 'neural network', 'langchain'] if term in resume_lower),
-            'software_development': sum(1 for term in ['api', 'backend', 'frontend', 'full-stack', 'web application', 'django', 'flask', 'react', 'node.js', 'sql'] if term in resume_lower),
-            'data_science': sum(1 for term in ['data science', 'pandas', 'numpy', 'matplotlib', 'data analysis', 'statistical'] if term in resume_lower)
-        }
-        
-        max_score = max(domain_scores.values()) if domain_scores else 0
-        if max_score > 0:
-            best_domains = [domain for domain, score in domain_scores.items() if score == max_score]
-            if len(best_domains) == 1:
-                target_domain = best_domains[0]
-
-    # 3. Final Default if still no domain found
-    if target_domain == 'general':
+    # Extract target domain from job description
+    jd_lower = jd_text.lower()
+    if any(term in jd_lower for term in ['machine learning', 'ml engineer', 'data scientist', 'ai']):
+        target_domain = 'machine_learning'
+    elif any(term in jd_lower for term in ['software developer', 'full stack', 'backend', 'frontend', 'web developer']):
         target_domain = 'software_development'
-
+    elif any(term in jd_lower for term in ['devops', 'site reliability', 'infrastructure', 'deployment']):
+        target_domain = 'devops'
+    else:
+        target_domain = 'software_development'  # default
+    
     for attempt in range(3):
         try:
             input_prompt = evaluation_prompt.format_prompt(
@@ -506,26 +475,38 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                     else:
                         raise ValueError(f'Missing keys: {missing_keys} in parsed JSON')
                 
-                # Override the LLM's domain prediction with our more robust one
-                data["domain"] = target_domain.replace('_', ' ')
-                
+                # Ensure correct data types
                 if not isinstance(data["strengths"], list):
-                    data["strengths"] = [s.strip() for s in str(data["strengths"]).split('\n') if s.strip()]
+                    if isinstance(data["strengths"], str):
+                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                    else:
+                        data["strengths"] = ["Shows learning potential and technical curiosity"]
                 
                 if not isinstance(data["weaknesses"], list):
-                    data["weaknesses"] = [w.strip() for w in str(data["weaknesses"]).split('\n') if w.strip()]
+                    if isinstance(data["weaknesses"], str):
+                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
+                    else:
+                        data["weaknesses"] = ["Limited domain-specific experience"]
                 
                 # Calculate realistic score based on domain relevance
                 try:
                     llm_score = int(float(data["score"]))
                     domain_specific_score = calculate_domain_specific_score(resume_text, target_domain)
                     
+                    # Take the more conservative score
                     final_score = min(llm_score, domain_specific_score)
+                    
+                    # Additional penalty for domain mismatch
+                    if target_domain == 'machine_learning' and 'machine learning' not in resume_text.lower():
+                        final_score = min(final_score, 45)  # Cap at 45 for non-ML candidates applying to ML roles
+                    elif target_domain == 'software_development' and not any(term in resume_text.lower() for term in ['web', 'software', 'application', 'system', 'backend', 'frontend']):
+                        final_score = min(final_score, 40)  # Cap for non-software candidates
                     
                     data["score"] = final_score
                 except (ValueError, TypeError):
                     data["score"] = calculate_domain_specific_score(resume_text, target_domain)
                 
+                # Set job match based on realistic threshold
                 data["job_match"] = "yes" if data["score"] >= 55 else "no"
                 
                 result = ResumeAnalysis(**data)
@@ -548,41 +529,67 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     
     return ResumeAnalysis(
         domain=target_domain.replace('_', ' '),
-        summary=f"Fallback Analysis: Entry-level candidate with foundational CS skills. Limited domain-specific experience for {target_domain.replace('_', ' ')} roles.",
-        strengths=["Strong academic background", "Basic programming skills", "Active learning mindset"],
-        weaknesses=[f"Limited {target_domain.replace('_', ' ')} specific experience", "Lack of industry internships"],
+        summary=f"Entry-level candidate with foundational skills in computer science. Shows academic competence but limited domain-specific experience for {target_domain.replace('_', ' ')} roles.",
+        strengths=[
+            "Strong academic background with good CGPA",
+            "Basic programming skills and project experience", 
+            "Active learning mindset and technical curiosity",
+            "Involvement in extracurricular activities"
+        ],
+        weaknesses=[
+            f"Limited {target_domain.replace('_', ' ')} specific experience",
+            "Lack of industry internships or professional experience",
+            "Projects not directly aligned with target domain",
+            "Need to develop deeper technical expertise"
+        ],
         score=realistic_score,
         job_match="yes" if realistic_score >= 55 else "no"
     )
 
 # ------------------- Streamlit App -------------------
-st.set_page_config(page_title="AI Resume Analyzer", layout="wide")
-st.title("📄 AI Resume Analyzer")
+st.set_page_config(page_title="AI Resume Analyzer - Improved")
+st.title("Resume Analyzer + Matcher + Excel Export (Improved)")
 
-st.info("Upload resumes and optionally provide a job description to get a detailed, domain-aware analysis.", icon="🔧")
+st.info("🔧 **Improvements Made:**\n"
+        "• Realistic scoring (no more inflated 100/100 scores)\n"
+        "• Domain-specific evaluation (ML projects won't boost software dev scores)\n"
+        "• Better URL extraction for LinkedIn/GitHub\n"
+        "• Conservative scoring for entry-level candidates")
 
-uploaded_files = st.file_uploader("Upload Resumes (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
-job_desc = st.text_area("Paste Job Description (Optional - for job matching)")
+uploaded_files = st.file_uploader("Upload Resumes", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+job_desc = st.text_area("Paste Job Description (optional)")
 
-if st.button("🚀 Run Analysis", use_container_width=True):
+if st.button("Run Analysis"):
     if not uploaded_files:
-        st.warning("Please upload at least one resume.")
+        st.warning("Please upload resumes.")
     else:
-        progress_bar = st.progress(0, text="Starting analysis...")
+        st.info("Analyzing resumes...")
         all_results = []
-        
-        for i, file in enumerate(uploaded_files):
-            progress_bar.progress((i + 1) / len(uploaded_files), text=f"Analyzing: {file.name}")
+        resume_docs = []
+
+        for file in uploaded_files:
             text = extract_text(file)
             if not text.strip():
                 st.warning(f"Could not extract text from: {file.name}")
                 continue
 
+            inferred_domain = "devops" if "devops" in file.name.lower() else (
+                              "datascience" if "ds" in file.name.lower() else (
+                              "java" if "java" in file.name.lower() else (
+                              "fullstack" if "full" in file.name.lower() else "general")))
+
             try:
-                # Use the same evaluation function for all cases now
-                analysis = evaluate_resume_vs_jd(text, job_desc)
-                meta = extract_metadata(text)
-                resume_id = f"{analysis.domain.replace(' ', '_')}_{meta['phone'] or uuid.uuid4().hex[:10]}"
+                analysis, meta, resume_id = analyze_resume(text, inferred_domain)
+                doc = Document(
+                    page_content=text,
+                    metadata={
+                        "resume_id": resume_id,
+                        "file_name": file.name,
+                        "domain": inferred_domain,
+                        **meta
+                    }
+                )
+                resume_docs.append(doc)
 
                 all_results.append({
                     "Resume ID": resume_id,
@@ -592,94 +599,144 @@ if st.button("🚀 Run Analysis", use_container_width=True):
                     "Email": meta["email"],
                     "LinkedIn": meta["linkedin"],
                     "GitHub": meta["github"],
-                    "Domain": analysis.domain,
+                    "Domain": inferred_domain,
                     "Summary": analysis.summary,
-                    "Strengths": analysis.strengths,
-                    "Weaknesses": analysis.weaknesses,
+                    "Strengths": "\n".join(analysis.strengths),
+                    "Weaknesses": "\n".join(analysis.weaknesses),
                     "Score": analysis.score,
-                    "Job Match": "✅ Yes" if analysis.job_match == "yes" else "❌ No"
                 })
 
             except Exception as e:
                 st.error(f"Error analyzing {file.name}: {e}")
-        
-        progress_bar.progress(1.0, text="Analysis complete!")
 
-        if all_results:
-            st.success("✅ Analysis Complete")
-            df = pd.DataFrame(all_results)
+        if job_desc and resume_docs:
+            domain_guess = "devops" if "devops" in job_desc.lower() else (
+                           "datascience" if "data" in job_desc.lower() else (
+                           "java" if "java" in job_desc.lower() else (
+                           "fullstack" if "full" in job_desc.lower() else "general")))
 
-            # *** CHANGED UI LOGIC ***
-            # Display each resume using the desired layout inside an expander
-            for idx, row in df.sort_values("Score", ascending=False).iterrows():
-                if row['Score'] >= 65:
-                    score_color = "green"
-                    score_icon = "🟢"
-                elif row['Score'] >= 50:
-                    score_color = "orange"
-                    score_icon = "🟡"
+            vectorstore = build_vectorstore(resume_docs)
+            top_docs = match_resumes(vectorstore, job_desc, domain_guess, k=TOP_K)
+
+            evaluated = {}
+            for doc in top_docs:
+                try:
+                    evaluation = evaluate_resume_vs_jd(doc.page_content, job_desc)
+                    evaluated[doc.metadata["resume_id"]] = evaluation
+                except Exception as e:
+                    pass
+
+            # Update results with evaluations
+            for row in all_results:
+                rid = row["Resume ID"]
+                evaluation = evaluated.get(rid)
+
+                if evaluation:
+                    row["Strengths"] = "\n".join(evaluation.strengths)
+                    row["Weaknesses"] = "\n".join(evaluation.weaknesses)
+                    row["Score"] = evaluation.score
+                    row["Summary"] = evaluation.summary
+                    row["Job Match"] = "✅ Yes" if evaluation.score >= 55 else "❌ No"
                 else:
-                    score_color = "red"
-                    score_icon = "🔴"
-                
-                with st.expander(f"**{row['Name'] or row['File Name']}** | Score: **:{score_color}[{row['Score']}]** | Match: {row.get('Job Match', 'N/A')}"):
-                    
-                    # --- Top Section: Personal Info & Evaluation ---
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.subheader("👤 Personal Information")
-                        st.write(f"**Name:** {row['Name'] or 'Not Found'}")
-                        st.write(f"**Email:** {row['Email'] or 'Not Found'}")
-                        st.write(f"**Phone:** {row['Phone'] or 'Not Found'}")
-                        st.write(f"**LinkedIn:** [{row['LinkedIn']}]({row['LinkedIn']})" if row['LinkedIn'] else "Not Found")
-                        st.write(f"**GitHub:** [{row['GitHub']}]({row['GitHub']})" if row['GitHub'] else "Not Found")
-                        st.write(f"**Resume ID:** `{row['Resume ID']}`")
+                    row["Job Match"] = "❌ No"
 
-                    with col2:
-                        st.subheader("📊 Evaluation")
-                        st.write(f"**Predicted Domain:** `{row['Domain']}`")
-                        st.metric(label="Score", value=f"{row['Score']} / 100", help="This score is based on domain relevance, technical depth, and evidence of work.")
+        df = pd.DataFrame(all_results)
+        st.success("✅ Analysis Complete")
+        
+        # Display each resume as an expandable section for better readability
+        for idx, row in df.iterrows():
+            # Color coding based on score
+            if row['Score'] >= 70:
+                score_color = "🟢"
+            elif row['Score'] >= 55:
+                score_color = "🟡"
+            else:
+                score_color = "🔴"
+                
+            with st.expander(f"📄 {row['File Name']} - {score_color} Score: {row['Score']} - {row.get('Job Match', '❌ No')}"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**👤 Personal Information:**")
+                    if row['Name']:
+                        st.write(f"**Name:** {row['Name']}")
+                    if row['Email']:
+                        st.write(f"**Email:** {row['Email']}")
+                    if row['Phone']:
+                        st.write(f"**Phone:** {row['Phone']}")
+                    if row['LinkedIn']:
+                        st.write(f"**LinkedIn:** {row['LinkedIn']}")
+                    if row['GitHub']:
+                        st.write(f"**GitHub:** {row['GitHub']}")
+                    
+                    st.write(f"**Domain:** {row['Domain']}")
+                    st.write(f"**Resume ID:** {row['Resume ID']}")
+                
+                with col2:
+                    st.write("**📊 Evaluation:**")
+                    st.write(f"**Score:** {row['Score']}/100 {score_color}")
+                    if 'Job Match' in row:
                         st.write(f"**Job Match:** {row['Job Match']}")
-                    
-                    st.divider()
-
-                    # --- Middle Section: Summary ---
-                    st.subheader("📝 Summary")
-                    st.write(row['Summary'])
-                    
-                    st.divider()
-                    
-                    # --- Bottom Section: Strengths & Weaknesses ---
-                    col3, col4 = st.columns(2)
-                    with col3:
-                        st.subheader("✅ Strengths")
-                        for strength in row['Strengths']:
-                            st.markdown(f"- {strength}")
-                    with col4:
-                        st.subheader("⚠️ Weaknesses")
-                        for weakness in row['Weaknesses']:
-                            st.markdown(f"- {weakness}")
-
-            st.write("---")
-            
-            @st.cache_data
-            def convert_df_to_excel(df_to_convert):
-                # Make lists readable in Excel
-                df_copy = df_to_convert.copy()
-                df_copy['Strengths'] = df_copy['Strengths'].apply(lambda x: "\n".join(f"- {s}" for s in x))
-                df_copy['Weaknesses'] = df_copy['Weaknesses'].apply(lambda x: "\n".join(f"- {w}" for w in x))
                 
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_copy.to_excel(writer, index=False, sheet_name='Resume Analysis')
-                processed_data = output.getvalue()
-                return processed_data
+                st.write("**📝 Summary:**")
+                st.write(row['Summary'])
+                
+                col3, col4 = st.columns(2)
+                with col3:
+                    st.write("**✅ Strengths:**")
+                    strengths = row['Strengths'].split('\n') if isinstance(row['Strengths'], str) else row['Strengths']
+                    for strength in strengths:
+                        if strength.strip():
+                            st.write(f"• {strength.strip()}")
+                
+                with col4:
+                    st.write("**⚠️ Weaknesses:**")
+                    weaknesses = row['Weaknesses'].split('\n') if isinstance(row['Weaknesses'], str) else row['Weaknesses']
+                    for weakness in weaknesses:
+                        if weakness.strip():
+                            st.write(f"• {weakness.strip()}")
+        
+        st.write("---")
+        
+        # Scoring explanation
+        st.write("### 📊 Scoring Guide:")
+        st.info("""
+        **🟢 60-100**: Strong evidence of proven work and implementations
+        **🟡 40-59**: Some proven projects but limited scope or domain mismatch  
+        **🔴 Below 40**: Mostly claims without sufficient proof of implementation
+        
+        **Scoring Philosophy:**
+        - **Proven Work > Claimed Skills**: Live projects, GitHub code, deployments carry the most weight
+        - **Implementation > Knowledge**: What you've built matters more than what you've studied
+        - **Domain Relevance**: Cross-domain projects have limited impact on scores
+        - **Evidence Required**: Skill lists without project context are heavily penalized
+        
+        *Note: Even strong students typically score 40-65 without substantial proven work and relevant domain experience.*
+        """)
+        
+        # Also show a compact summary table
+        st.write("### 📋 Summary Table")
+        summary_df = df[['File Name', 'Name', 'Domain', 'Score', 'Job Match']].copy()
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "File Name": st.column_config.TextColumn("File Name", width="large"),
+                "Name": st.column_config.TextColumn("Name", width="medium"),
+                "Domain": st.column_config.TextColumn("Domain", width="small"),
+                "Score": st.column_config.NumberColumn("Score", width="small", format="%d"),
+                "Job Match": st.column_config.TextColumn("Job Match", width="small")
+            }
+        )
 
-            excel_data = convert_df_to_excel(df)
-            st.download_button(
-                label="📥 Download Full Analysis as Excel",
-                data=excel_data,
-                file_name="resume_analysis_results.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        excel_buffer.seek(0)
+
+        st.download_button(
+            label="📥 Download as Excel",
+            data=excel_buffer,
+            file_name="resume_analysis_improved.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
