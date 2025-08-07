@@ -165,58 +165,44 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     )
     response = llm.invoke(input_prompt.to_messages())
 
-    # FIRST: Try to parse using PydanticOutputParser
     try:
+        # ✅ Primary parsing using LangChain PydanticOutputParser
         result = parser.parse(response.content)
+
         if isinstance(result, ResumeAnalysis):
             result.job_match = "yes" if result.score >= 60 else "no"
+            return result
 
-        return result
     except Exception as e:
-        # If parser fails, attempt to recover JSON manually
+        # 🔁 Fallback on parse failure
         raw = response.content.strip()
-        st.info("Raw LLM output:\n", raw)
+        st.markdown(f"### ❌ Parsing failed. Reason: `{e}`")
+        st.markdown("#### 🔍 Raw LLM Output:")
+        st.code(raw, language="json")
 
         try:
-            # match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
-            match = re.search(r"\{.*?\}", raw, re.DOTALL)  # Safer fallback for small JSONs
-            if match:
-                json_str = match.group()
-                try:
-                    data = json.loads(json_str)
-                    
-                    # ✅ Add validation here
-                    required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
-                    for key in required_keys:
-                        if key not in data:
-                            raise ValueError(f'Missing key: "{key}" in parsed JSON')
-
-                    return ResumeAnalysis(**data)
-
-                except Exception as e:
-                    print(f"Fallback parsing failed: {e}")
-                    return None
-
-            else:
+            # 🧠 Try extracting JSON manually
+            match = re.search(r"\{.*?\}", raw, re.DOTALL)
+            if not match:
                 raise ValueError("No JSON object found in model output.")
 
             json_str = match.group()
-            json_str = re.sub(r",\s*}", "}", json_str)  # trailing commas
-            json_str = re.sub(r",\s*]", "]", json_str)
-
             data = json.loads(json_str)
+
+            # ✅ Key validation
+            required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
+            for key in required_keys:
+                if key not in data:
+                    raise ValueError(f'Missing key: "{key}" in parsed JSON')
+
+            # 🎯 Job match decision
             score = int(data.get("score", 0))
             data["job_match"] = "yes" if score >= 60 else "no"
-            data["job_match"] = "yes" if score >= 60 else "no"
-
 
             return ResumeAnalysis(**data)
 
         except Exception as e2:
             raise ValueError(f"⚠️ Evaluation failed: {e2}\n\nRaw output:\n{raw}")
-
-
-
 
 
 # ------------------- Streamlit App -------------------
