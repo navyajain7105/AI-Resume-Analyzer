@@ -118,6 +118,38 @@ Return ONLY this JSON format:
 JSON response:""")
 ])
 
+analysis_only_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are an expert technical recruiter and resume evaluator. Your goal is to provide a fair and realistic assessment, especially for students and early-career candidates. You must respond with ONLY valid JSON, no other text.\n\n"
+     "EVALUATION PHILOSOPHY:\n"
+     "- **Evidence is Key**: Value tangible proof over claims. Deployed projects, public GitHub repositories, technical blog posts, and hackathon awards are strong positive signals.\n"
+     "- **Don't Over-Penalize Students**: Do not harshly penalize for lack of formal 'internships' if they demonstrate strong skills through complex projects and achievements.\n"
+     "- **Recognize Initiative**: Reward initiative shown through personal projects, content creation (blogs), and participation in competitions. A major hackathon win (e.g., from Google, Microsoft) is a significant achievement.\n\n"
+     "SCORING GUIDELINES (0-100):\n"
+     "- **70-90**: Exceptional student/candidate with multiple high-quality, deployed projects, and/or significant achievements like winning major hackathons.\n"
+     "- **55-69**: Strong candidate with solid, well-documented projects and a clear grasp of relevant technologies.\n"
+     "- **40-54**: Promising candidate with some project experience but needs more depth or tangible proof.\n"
+     "- **Below 40**: Candidate with mostly academic knowledge, lacking significant project implementation.\n\n"
+     "Your analysis must highlight these tangible proofs in the 'strengths' section."
+     ),
+    ("human",
+     """Analyze the following resume and provide a fair evaluation based on the principles of valuing evidence and initiative.
+
+Resume:
+{resume_text}
+
+Return ONLY this JSON format, ensuring the strengths reflect tangible achievements:
+{{
+  "domain": "predicted domain based on strongest projects/skills",
+  "summary": "A 3-line honest summary of the candidate's profile, focusing on their demonstrated projects and achievements.",
+  "strengths": ["List of strengths, emphasizing tangible proof like specific projects, deployments, publications, or awards."],
+  "weaknesses": ["List of constructive weaknesses, such as lack of formal industry experience or areas for deeper skill development."],
+  "score": 65
+}}
+
+JSON response:""")
+])
+
 load_dotenv()
 
 llm = ChatGroq(model_name="llama-3.1-8b-instant")
@@ -244,38 +276,29 @@ def match_resumes(vectorstore, job_desc, domain_filter, k=TOP_K):
     return filtered[:k]
 
 def analyze_resume(text, domain):
-    # Get initial analysis from the LLM using the generic prompt
-    input_prompt = resume_prompt.format_prompt(
-        resume_text=text,
-        format_instructions=parser.get_format_instructions()
+    """
+    Analyzes a resume using a detailed, fair prompt to evaluate students 
+    and early-career candidates correctly, focusing on tangible achievements.
+    """
+    # Use the new, fairer prompt for a comprehensive and just analysis.
+    input_prompt = analysis_only_prompt.format_prompt(
+        resume_text=text
     )
     output = llm.invoke(input_prompt.to_messages())
-    analysis = parser.parse(output.content)
     
-    # FIX: Calculate a more robust, rule-based score to override unfairly low initial scores.
-    # Infer the candidate's primary domain from resume keywords for accurate scoring.
-    resume_lower = text.lower()
-    inferred_score_domain = 'software_development' # Default
-    
-    ml_keywords = ['machine learning', 'data science', 'ai', 'llm', 'neural network', 'tensorflow', 'pytorch', 'scikit-learn', 'opencv']
-    swe_keywords = ['software', 'web dev', 'full stack', 'backend', 'frontend', 'api', 'database', 'react', 'node.js', 'django']
-
-    if any(term in resume_lower for term in ml_keywords):
-        inferred_score_domain = 'machine_learning'
-    elif any(term in resume_lower for term in swe_keywords):
-        inferred_score_domain = 'software_development'
-        
-    rule_based_score = calculate_domain_specific_score(text, inferred_score_domain)
-
-    # To counteract unfairly low scores from the generic prompt, take the higher of the two scores.
-    # This ensures that tangible proof of work (projects, awards) is always valued.
-    final_score = max(analysis.score, rule_based_score)
-    analysis.score = min(final_score, 90) # Cap score for a more realistic student profile without a direct JD match
+    # Parse the complete, high-quality analysis from the LLM.
+    try:
+        cleaned_json = clean_json_response(output.content)
+        data = json.loads(cleaned_json)
+        analysis = ResumeAnalysis(**data)
+    except Exception as e:
+        # Fallback in case of a parsing error
+        raise ValueError(f"Failed to parse analysis from LLM: {e}\nResponse: {output.content}")
 
     meta = extract_metadata(text)
     resume_id = f"{domain}_{meta['phone'] or uuid.uuid4().hex[:10]}"
     return analysis, meta, resume_id
-
+    
 def clean_json_response(raw_response: str) -> str:
     """Clean and extract JSON from LLM response"""
     raw_response = raw_response.strip()
