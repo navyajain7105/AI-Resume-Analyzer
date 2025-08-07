@@ -52,16 +52,23 @@ Resume:
 
 evaluation_prompt = ChatPromptTemplate.from_messages([
     ("system", 
-     "You are a strict technical evaluator. You must respond with ONLY valid JSON, no other text.\n\n"
-     "Instructions:\n"
-     "- Focus only on actual experience, not skills sections without context\n"
-     "- Be strict and conservative in scoring\n"
-     "- Score must be between 0-100\n"
-     "- Below 60 = not a good match\n"
-     "- Return ONLY the JSON object, nothing else"
+     "You are an extremely strict technical recruiter. You must respond with ONLY valid JSON, no other text.\n\n"
+     "CRITICAL SCORING RULES:\n"
+     "- ONLY actual work experience, internships, and real projects count\n"
+     "- Academic courses, certifications alone = MAX 20 points\n"
+     "- No relevant projects/internships = MAX 30 points\n"
+     "- Skills section without proof = 0 points\n"
+     "- Art/design/non-tech activities = 0 points for tech roles\n\n"
+     "SCORING SCALE:\n"
+     "- 0-30: No relevant experience\n"
+     "- 31-50: Some relevant coursework but no practical experience\n"
+     "- 51-70: Has some projects or internships\n"
+     "- 71-85: Good relevant experience\n"
+     "- 86-100: Excellent match with proven track record\n\n"
+     "BE RUTHLESS. If no real projects exist, score must be under 30."
     ),
      ("human", 
-        """Analyze this resume against the job description.
+        """Analyze this resume against the job description. Focus ONLY on actual hands-on experience.
 
 Job Description:
 {jd_text}
@@ -69,13 +76,19 @@ Job Description:
 Resume:
 {resume_text}
 
+Look for:
+1. Actual software projects (GitHub, deployed apps, etc.)
+2. Relevant internships or jobs
+3. Real technical implementations
+4. Ignore: courses, skills lists without context, art projects
+
 Return ONLY this JSON format:
 {{
   "domain": "predicted domain",
-  "summary": "brief 3-line summary",
-  "strengths": ["strength1", "strength2", "strength3"],
-  "weaknesses": ["weakness1", "weakness2", "weakness3"],
-  "score": 75
+  "summary": "brief summary focusing on actual experience level",
+  "strengths": ["only real strengths with evidence"],
+  "weaknesses": ["major gaps in experience"],
+  "score": 25
 }}
 
 JSON response:""")
@@ -193,15 +206,14 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
         try:
             input_prompt = evaluation_prompt.format_prompt(
                 resume_text=resume_text,
-                jd_text=jd_text,
-                format_instructions=parser.get_format_instructions()
+                jd_text=jd_text
             )
             
             response = llm.invoke(input_prompt.to_messages())
             raw = response.content.strip()
             
-            # Debug output (show only first 500 chars to avoid clutter)
-            st.text_area(f"Raw LLM Output (Attempt {attempt + 1})", raw[:500] + "..." if len(raw) > 500 else raw, height=150)
+            # Debug output (show only first 500 chars to avoid clutter) - REMOVE THIS IN PRODUCTION
+            # st.text_area(f"Raw LLM Output (Attempt {attempt + 1})", raw[:500] + "..." if len(raw) > 500 else raw, height=150)
             
             # If response is too short or obviously malformed, try again
             if len(raw) < 20 or not ('{' in raw and '}' in raw):
@@ -214,7 +226,7 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             # Clean the response
             try:
                 cleaned_json = clean_json_response(raw)
-                st.text_area(f"Cleaned JSON (Attempt {attempt + 1})", cleaned_json, height=150)
+                # st.text_area(f"Cleaned JSON (Attempt {attempt + 1})", cleaned_json, height=150)  # REMOVE THIS IN PRODUCTION
             except Exception as clean_error:
                 if attempt < 2:
                     st.warning(f"Attempt {attempt + 1}: JSON cleaning failed: {clean_error}")
@@ -222,17 +234,7 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                 else:
                     raise ValueError(f"JSON cleaning failed after all attempts: {clean_error}")
             
-            # Try parsing with PydanticOutputParser first
-            try:
-                result = parser.parse(cleaned_json)
-                if isinstance(result, ResumeAnalysis):
-                    result.job_match = "yes" if result.score >= 60 else "no"
-                    st.success(f"✅ Successfully parsed with PydanticOutputParser on attempt {attempt + 1}")
-                    return result
-            except Exception as parser_error:
-                st.warning(f"Attempt {attempt + 1}: PydanticOutputParser failed: {parser_error}")
-            
-            # Fallback to manual JSON parsing
+            # Try parsing with manual JSON parsing (skip PydanticOutputParser for now)
             try:
                 data = json.loads(cleaned_json)
                 
@@ -259,17 +261,38 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                     else:
                         data["weaknesses"] = ["Unable to parse weaknesses"]
                 
-                # Ensure score is integer
+                # Ensure score is integer and enforce strict limits
                 try:
-                    data["score"] = int(float(data["score"]))  # Handle both int and float strings
+                    score = int(float(data["score"]))
+                    
+                    # Additional validation - if score seems too high, cap it
+                    resume_lower = resume_text.lower()
+                    has_projects = any(keyword in resume_lower for keyword in [
+                        'github', 'deployed', 'built', 'developed', 'implemented', 
+                        'created', 'project', 'internship', 'work experience'
+                    ])
+                    
+                    has_tech_projects = any(keyword in resume_lower for keyword in [
+                        'python', 'java', 'javascript', 'react', 'node', 'sql', 
+                        'database', 'api', 'web development', 'software', 'programming'
+                    ])
+                    
+                    # If no clear technical projects found, cap score at 30
+                    if not has_projects or not has_tech_projects:
+                        if score > 30:
+                            score = min(score, 30)
+                            st.warning(f"Score capped at 30 due to lack of proven technical projects")
+                    
+                    data["score"] = score
+                    
                 except (ValueError, TypeError):
-                    data["score"] = 0
+                    data["score"] = 20  # Default low score for parsing errors
                 
                 # Add job match determination
                 data["job_match"] = "yes" if data["score"] >= 60 else "no"
                 
                 result = ResumeAnalysis(**data)
-                st.success(f"✅ Successfully parsed with manual JSON parsing on attempt {attempt + 1}")
+                st.success(f"✅ Successfully evaluated - Score: {result.score}")
                 return result
                 
             except json.JSONDecodeError as json_error:
@@ -293,8 +316,8 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
         domain="unknown",
         summary="Analysis failed due to technical error - multiple parsing attempts unsuccessful",
         strengths=["Unable to evaluate due to technical error"],
-        weaknesses=["Technical evaluation error occurred"],
-        score=0,
+        weaknesses=["Technical evaluation error occurred", "Unable to assess actual experience"],
+        score=10,  # Very low default score
         job_match="no"
     )
 
