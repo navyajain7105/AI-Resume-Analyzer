@@ -35,7 +35,6 @@ class ResumeAnalysis(BaseModel):
     strengths: List[str] = Field(..., description="Resume strengths as a list")
     weaknesses: List[str] = Field(..., description="Resume weaknesses as a list")
     score: int = Field(..., description="Overall score out of 100")
-    job_match: str = Field(..., description="yes if score >= 60, else no")
 
 parser = PydanticOutputParser(pydantic_object=ResumeAnalysis)
 
@@ -75,7 +74,6 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
      '  "strengths": ["List of strengths"],\n'
      '  "weaknesses": ["List of weaknesses"],\n'
      '  "score": Integer score between 0 and 100,\n'
-     '  "job_match": "yes" or "no" based on score (yes if score >= 60)\n'
      "}"
     ),
      ("human", 
@@ -169,7 +167,9 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     # FIRST: Try to parse using PydanticOutputParser
     try:
         result = parser.parse(response.content)
-        result.job_match = "yes" if result.score >= 60 else "no"
+        if isinstance(result, ResumeAnalysis):
+            result.job_match = "yes" if result.score >= 60 else "no"
+
         return result
     except Exception as e:
         # If parser fails, attempt to recover JSON manually
@@ -186,6 +186,8 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
             data = json.loads(json_str)
             score = int(data.get("score", 0))
             data["job_match"] = "yes" if score >= 60 else "no"
+            data["job_match"] = "yes" if score >= 60 else "no"
+
 
             return ResumeAnalysis(**data)
 
@@ -275,18 +277,17 @@ if st.button("Run Analysis"):
 
             for row in all_results:
                 rid = row["Resume ID"]
-                if rid in evaluated:
-                    row["Strengths"] = "\n".join(evaluated[rid].strengths)
-                    row["Weaknesses"] = "\n".join(evaluated[rid].weaknesses)
-                    row["Score"] = evaluated[rid].score
-                    row["Job Match"] = "✅ Yes" if evaluated[rid].job_match.lower() == "yes" else "❌ No"
+                evaluation = evaluated.get(rid)
+
+                if evaluation:
+                    row["Strengths"] = "\n".join(evaluation.strengths)
+                    row["Weaknesses"] = "\n".join(evaluation.weaknesses)
+                    row["Score"] = evaluation.score
+                    row["Summary"] = evaluation.summary
+                    row["Job Match"] = "✅ Yes" if evaluation.score >= 60 else "❌ No"
                 else:
                     row["Job Match"] = "❌ No"
 
-                if rid in evaluated:
-                    row["Strengths"] = "\n".join(evaluated[rid].strengths)
-                    row["Weaknesses"] = "\n".join(evaluated[rid].weaknesses)
-                    row["Score"] = evaluated[rid].score
 
         df = pd.DataFrame(all_results)
         st.success("✅ Analysis Complete")
