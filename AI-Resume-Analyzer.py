@@ -81,7 +81,8 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
     ("human", 
      "Job Description:\n{jd_text}\n\n"
      "Candidate Resume:\n{resume_text}\n\n"
-     "Return ONLY the JSON response. Do NOT explain anything.")
+     "Return ONLY the JSON response. Do NOT explain anything.Follow this output format:{format_instructions}")
+
 ])
 
 load_dotenv()
@@ -151,9 +152,17 @@ def analyze_resume(text, domain):
     return analysis, meta, resume_id
 
 def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
-    input_prompt = evaluation_prompt.format_prompt(resume_text=resume_text, jd_text=jd_text)
-    output = llm.invoke(input_prompt.to_messages())
-    raw = output.content.strip()
+    input_prompt = evaluation_prompt.format_prompt(resume_text=resume_text, jd_text=jd_text,format_instructions=parser.get_format_instructions())
+    response = llm.invoke(input_prompt.to_messages())
+    # raw = output.content.strip()
+
+    try:
+        result = parser.parse(response.content)
+        result.job_match = "yes" if result.score >= 60 else "no"
+        return result
+    except Exception as e:
+        raise ValueError(f"⚠️ Evaluation failed: {e}\n\nRaw output:\n{response.content}")
+
 
     try:
         # Attempt to extract JSON manually
