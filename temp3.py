@@ -146,6 +146,11 @@ def extract_text(file):
 
 def extract_metadata(text: str):
     """Improved metadata extraction with better regex patterns"""
+    
+    # FIX: Pre-process text to join URLs broken by hyphens and newlines
+    # This handles cases like '.../navya-\njain-...'
+    processed_text = re.sub(r'-\s*\n', '', text)
+
     # Name extraction - look for patterns after common indicators
     name_patterns = [
         r"(?i)^([A-Z][a-z]+ [A-Z][a-z]+)",  # First line capitalized names
@@ -155,66 +160,62 @@ def extract_metadata(text: str):
     
     name = None
     for pattern in name_patterns:
-        name_match = re.search(pattern, text, re.MULTILINE)
+        # Use processed_text for search
+        name_match = re.search(pattern, processed_text, re.MULTILINE)
         if name_match:
             candidate_name = name_match.group(1).strip()
-            # Filter out common false positives
             if candidate_name and len(candidate_name) > 3 and not any(word in candidate_name.lower() for word in ['contact', 'education', 'experience', 'skills']):
                 name = candidate_name
                 break
     
     # Phone extraction - support various formats
     phone_patterns = [
-        r"\b(\+?91[-\s]?)?([6789]\d{9})\b",  # Indian format
-        r"\b(\d{10})\b",  # 10 digit
-        r"\+\d{1,3}[-.\s]?\d{10,}",  # International format
+        r"\b(\+?91[-\s]?)?([6789]\d{9})\b",
+        r"\b(\d{10})\b",
+        r"\+\d{1,3}[-.\s]?\d{10,}",
     ]
     
     phone = None
     for pattern in phone_patterns:
-        phone_match = re.search(pattern, text)
+        phone_match = re.search(pattern, processed_text)
         if phone_match:
             phone = phone_match.group().strip()
             break
     
     # Email extraction
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", processed_text)
     
-    # LinkedIn extraction - FIXED pattern to avoid confusion with other URLs
+    # LinkedIn extraction
     linkedin_patterns = [
-        r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%?=&]+/?",  # Full URL with protocol
-        r"linkedin\.com/in/[a-zA-Z0-9\-_%]+/?",  # Without protocol
-        r"(?i)linkedin[:\s]*https?://[^\s]+",  # After "LinkedIn:" label
+        r"https?://(?:www\.)?linkedin\.com/in/[a-zA-Z0-9\-_%?=&]+/?",
+        r"linkedin\.com/in/[a-zA-Z0-9\-_%]+/?",
+        r"(?i)linkedin[:\s]*https?://[^\s]+",
     ]
     
     linkedin = None
     for pattern in linkedin_patterns:
-        linkedin_match = re.search(pattern, text, re.IGNORECASE)
+        linkedin_match = re.search(pattern, processed_text, re.IGNORECASE)
         if linkedin_match:
             linkedin_url = linkedin_match.group().strip()
-            # Clean up the URL
             if 'linkedin' in linkedin_url.lower() and 'linkedin.com/in/' in linkedin_url:
-                # Ensure it's a proper URL
                 if not linkedin_url.startswith('http'):
                     linkedin_url = 'https://' + linkedin_url
                 linkedin = linkedin_url.rstrip('/')
                 break
     
-    # GitHub extraction - improved pattern
+    # GitHub extraction
     github_patterns = [
-        r"https?://(?:www\.)?github\.com/[a-zA-Z0-9\-_%?=&]+/?",  # Full URL with protocol
-        r"github\.com/[a-zA-Z0-9\-_%]+/?",  # Without protocol
-        r"(?i)github[:\s]*https?://[^\s]+",  # After "GitHub:" label
+        r"https?://(?:www\.)?github\.com/[a-zA-Z0-9\-_%?=&]+/?",
+        r"github\.com/[a-zA-Z0-9\-_%]+/?",
+        r"(?i)github[:\s]*https?://[^\s]+",
     ]
     
     github = None
     for pattern in github_patterns:
-        github_match = re.search(pattern, text, re.IGNORECASE)
+        github_match = re.search(pattern, processed_text, re.IGNORECASE)
         if github_match:
             github_url = github_match.group().strip()
-            # Clean up the URL
             if 'github' in github_url.lower() and 'github.com/' in github_url:
-                # Ensure it's a proper URL
                 if not github_url.startswith('http'):
                     github_url = 'https://' + github_url
                 github = github_url.rstrip('/')
@@ -243,12 +244,34 @@ def match_resumes(vectorstore, job_desc, domain_filter, k=TOP_K):
     return filtered[:k]
 
 def analyze_resume(text, domain):
+    # Get initial analysis from the LLM using the generic prompt
     input_prompt = resume_prompt.format_prompt(
         resume_text=text,
         format_instructions=parser.get_format_instructions()
     )
     output = llm.invoke(input_prompt.to_messages())
     analysis = parser.parse(output.content)
+    
+    # FIX: Calculate a more robust, rule-based score to override unfairly low initial scores.
+    # Infer the candidate's primary domain from resume keywords for accurate scoring.
+    resume_lower = text.lower()
+    inferred_score_domain = 'software_development' # Default
+    
+    ml_keywords = ['machine learning', 'data science', 'ai', 'llm', 'neural network', 'tensorflow', 'pytorch', 'scikit-learn', 'opencv']
+    swe_keywords = ['software', 'web dev', 'full stack', 'backend', 'frontend', 'api', 'database', 'react', 'node.js', 'django']
+
+    if any(term in resume_lower for term in ml_keywords):
+        inferred_score_domain = 'machine_learning'
+    elif any(term in resume_lower for term in swe_keywords):
+        inferred_score_domain = 'software_development'
+        
+    rule_based_score = calculate_domain_specific_score(text, inferred_score_domain)
+
+    # To counteract unfairly low scores from the generic prompt, take the higher of the two scores.
+    # This ensures that tangible proof of work (projects, awards) is always valued.
+    final_score = max(analysis.score, rule_based_score)
+    analysis.score = min(final_score, 90) # Cap score for a more realistic student profile without a direct JD match
+
     meta = extract_metadata(text)
     resume_id = f"{domain}_{meta['phone'] or uuid.uuid4().hex[:10]}"
     return analysis, meta, resume_id
