@@ -20,7 +20,8 @@ from typing import List, Optional
 from dotenv import load_dotenv
 
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
-os.environ["LANGCHAIN_API_KEY"] = ""
+# Make sure to set your Groq API key in your environment variables or replace ""
+os.environ["GROQ_API_KEY"] = "" 
 
 # ------------------- Config -------------------
 CHUNK_SIZE = 1000
@@ -79,7 +80,7 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
      "BE REALISTIC: Don't inflate scores. Better to be conservative and accurate."
     ),
      ("human", 
-        """Analyze this resume against the job description with STRICT domain relevance.
+       """Analyze this resume against the job description with STRICT domain relevance.
 
 Job Description:
 {jd_text}
@@ -120,6 +121,7 @@ JSON response:""")
 
 load_dotenv()
 
+# Ensure you have set the GROQ_API_KEY environment variable
 llm = ChatGroq(model_name="llama-3.1-8b-instant")
 
 # ------------------------- Helper Functions -------------------------
@@ -127,8 +129,14 @@ llm = ChatGroq(model_name="llama-3.1-8b-instant")
 def extract_text(file):
     if file.name.endswith(".pdf"):
         try:
+            # Clean up text by joining lines that might have been split
             doc = fitz.open(stream=file.read(), filetype="pdf")
-            return "\n".join(page.get_text() for page in doc)
+            full_text = ""
+            for page in doc:
+                full_text += page.get_text()
+            # A simple way to join hyphenated words split across lines
+            full_text = re.sub(r"-\n", "", full_text)
+            return full_text
         except:
             return ""
     elif file.name.endswith(".docx"):
@@ -146,6 +154,9 @@ def extract_text(file):
 
 def extract_metadata(text: str):
     """Improved metadata extraction with better regex patterns"""
+    # Join lines to handle multi-line contact info before regex matching
+    cleaned_text = re.sub(r'\s*\n\s*', ' ', text)
+
     # Name extraction - look for patterns after common indicators
     name_patterns = [
         r"(?i)^([A-Z][a-z]+ [A-Z][a-z]+)",  # First line capitalized names
@@ -154,6 +165,7 @@ def extract_metadata(text: str):
     ]
     
     name = None
+    # Use original text for name finding as it relies on line structure
     for pattern in name_patterns:
         name_match = re.search(pattern, text, re.MULTILINE)
         if name_match:
@@ -172,23 +184,22 @@ def extract_metadata(text: str):
     
     phone = None
     for pattern in phone_patterns:
-        phone_match = re.search(pattern, text)
+        phone_match = re.search(pattern, cleaned_text)
         if phone_match:
             phone = phone_match.group().strip()
             break
     
     # Email extraction
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    email_match = re.search(r"[\w\.\-]+@[\w\.\-]+\.\w+", cleaned_text)
     
     # LinkedIn extraction - improved pattern
     linkedin_patterns = [
-        r"(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9\-_/?=&]+",
-        r"linkedin\.com/in/[a-zA-Z0-9\-_]+",
+        r"(https?://)?(www\.)?linkedin\.com/in/[\w\-\/]+",
     ]
     
     linkedin = None
     for pattern in linkedin_patterns:
-        linkedin_match = re.search(pattern, text, re.IGNORECASE)
+        linkedin_match = re.search(pattern, cleaned_text, re.IGNORECASE)
         if linkedin_match:
             linkedin_url = linkedin_match.group().strip()
             # Ensure it's a proper URL
@@ -199,13 +210,12 @@ def extract_metadata(text: str):
     
     # GitHub extraction - improved pattern
     github_patterns = [
-        r"(https?://)?(www\.)?github\.com/[a-zA-Z0-9\-_/?=&]+",
-        r"github\.com/[a-zA-Z0-9\-_]+",
+        r"(https?://)?(www\.)?github\.com/[\w\-\/]+",
     ]
     
     github = None
     for pattern in github_patterns:
-        github_match = re.search(pattern, text, re.IGNORECASE)
+        github_match = re.search(pattern, cleaned_text, re.IGNORECASE)
         if github_match:
             github_url = github_match.group().strip()
             # Ensure it's a proper URL
@@ -290,7 +300,7 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     # PROVEN WORK INDICATORS - These carry the most weight
     proven_work_indicators = {
         'projects': {
-            'strong_evidence': ['github.com/', 'deployed', 'live demo', 'production', 'website:', 'app store', 'play store'],
+            'strong_evidence': ['[github.com/](https://github.com/)', 'deployed', 'live demo', 'production', 'website:', 'app store', 'play store'],
             'medium_evidence': ['project', 'developed', 'built', 'created', 'implemented', 'designed'],
             'weak_evidence': ['familiar with', 'knowledge of', 'learned']
         },
@@ -311,20 +321,20 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     
     # Strong evidence of work (40% weight)
     strong_work_count = sum(1 for category in proven_work_indicators.values() 
-                           for indicator in category['strong_evidence'] 
-                           if indicator in resume_lower)
+                            for indicator in category['strong_evidence'] 
+                            if indicator in resume_lower)
     proven_score += min(40, strong_work_count * 8)
     
     # Medium evidence of work (20% weight)
     medium_work_count = sum(1 for category in proven_work_indicators.values() 
-                           for indicator in category['medium_evidence'] 
-                           if indicator in resume_lower)
+                            for indicator in category['medium_evidence'] 
+                            if indicator in resume_lower)
     proven_score += min(20, medium_work_count * 3)
     
     # Weak evidence (10% weight)
     weak_work_count = sum(1 for category in proven_work_indicators.values() 
-                         for indicator in category['weak_evidence'] 
-                         if indicator in resume_lower)
+                          for indicator in category['weak_evidence'] 
+                          if indicator in resume_lower)
     proven_score += min(10, weak_work_count * 2)
     
     # DOMAIN-SPECIFIC IMPLEMENTATION EVIDENCE (20% of total)
@@ -547,45 +557,59 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     )
 
 # ------------------- Streamlit App -------------------
-st.set_page_config(page_title="AI Resume Analyzer - Improved")
-st.title("Resume Analyzer + Matcher + Excel Export (Improved)")
+st.set_page_config(page_title="AI Resume Analyzer - Improved", layout="wide")
+st.title("📄 AI Resume Analyzer & Matcher")
 
-st.info("🔧 **Improvements Made:**\n"
-        "• Realistic scoring (no more inflated 100/100 scores)\n"
-        "• Domain-specific evaluation (ML projects won't boost software dev scores)\n"
-        "• Better URL extraction for LinkedIn/GitHub\n"
-        "• Conservative scoring for entry-level candidates")
+st.info("🔧 **Improvements:** This version uses a dual-scoring system for more realistic evaluations, has better data extraction, and provides domain-specific analysis.", icon="🔧")
 
-uploaded_files = st.file_uploader("Upload Resumes", type=["pdf", "docx", "txt"], accept_multiple_files=True)
-job_desc = st.text_area("Paste Job Description (optional)")
+uploaded_files = st.file_uploader("Upload Resumes (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+job_desc = st.text_area("Paste Job Description (Optional - for job matching)")
 
-if st.button("Run Analysis"):
+if st.button("🚀 Run Analysis", use_container_width=True):
     if not uploaded_files:
-        st.warning("Please upload resumes.")
+        st.warning("Please upload at least one resume.")
     else:
-        st.info("Analyzing resumes...")
+        progress_bar = st.progress(0, text="Starting analysis...")
         all_results = []
         resume_docs = []
 
-        for file in uploaded_files:
+        for i, file in enumerate(uploaded_files):
+            progress_bar.progress((i + 1) / len(uploaded_files), text=f"Analyzing: {file.name}")
             text = extract_text(file)
             if not text.strip():
                 st.warning(f"Could not extract text from: {file.name}")
                 continue
 
-            inferred_domain = "devops" if "devops" in file.name.lower() else (
-                              "datascience" if "ds" in file.name.lower() else (
-                              "java" if "java" in file.name.lower() else (
-                              "fullstack" if "full" in file.name.lower() else "general")))
+            # Use JD to infer domain if available, otherwise guess from filename
+            if job_desc:
+                jd_lower = job_desc.lower()
+                if any(term in jd_lower for term in ['machine learning', 'ml', 'ai']):
+                    inferred_domain = 'machine_learning'
+                elif any(term in jd_lower for term in ['software', 'full stack', 'backend']):
+                    inferred_domain = 'software_development'
+                else:
+                    inferred_domain = 'general'
+            else:
+                 inferred_domain = "devops" if "devops" in file.name.lower() else (
+                                 "datascience" if "ds" in file.name.lower() else (
+                                 "java" if "java" in file.name.lower() else (
+                                 "fullstack" if "full" in file.name.lower() else "general")))
 
             try:
-                analysis, meta, resume_id = analyze_resume(text, inferred_domain)
+                # If JD is present, use the more advanced evaluation
+                if job_desc:
+                    analysis = evaluate_resume_vs_jd(text, job_desc)
+                    meta = extract_metadata(text)
+                    resume_id = f"{analysis.domain}_{meta['phone'] or uuid.uuid4().hex[:10]}"
+                else:
+                    analysis, meta, resume_id = analyze_resume(text, inferred_domain)
+
                 doc = Document(
                     page_content=text,
                     metadata={
                         "resume_id": resume_id,
                         "file_name": file.name,
-                        "domain": inferred_domain,
+                        "domain": analysis.domain,
                         **meta
                     }
                 )
@@ -599,144 +623,89 @@ if st.button("Run Analysis"):
                     "Email": meta["email"],
                     "LinkedIn": meta["linkedin"],
                     "GitHub": meta["github"],
-                    "Domain": inferred_domain,
+                    "Domain": analysis.domain,
                     "Summary": analysis.summary,
-                    "Strengths": "\n".join(analysis.strengths),
-                    "Weaknesses": "\n".join(analysis.weaknesses),
+                    "Strengths": "\n".join(f"• {s}" for s in analysis.strengths),
+                    "Weaknesses": "\n".join(f"• {w}" for w in analysis.weaknesses),
                     "Score": analysis.score,
+                    "Job Match": "✅ Yes" if analysis.job_match == "yes" else "❌ No"
                 })
 
             except Exception as e:
                 st.error(f"Error analyzing {file.name}: {e}")
+        
+        progress_bar.progress(1.0, text="Analysis complete!")
 
-        if job_desc and resume_docs:
-            domain_guess = "devops" if "devops" in job_desc.lower() else (
-                           "datascience" if "data" in job_desc.lower() else (
-                           "java" if "java" in job_desc.lower() else (
-                           "fullstack" if "full" in job_desc.lower() else "general")))
+        if all_results:
+            df = pd.DataFrame(all_results)
+            st.success("✅ Analysis Complete")
 
-            vectorstore = build_vectorstore(resume_docs)
-            top_docs = match_resumes(vectorstore, job_desc, domain_guess, k=TOP_K)
-
-            evaluated = {}
-            for doc in top_docs:
-                try:
-                    evaluation = evaluate_resume_vs_jd(doc.page_content, job_desc)
-                    evaluated[doc.metadata["resume_id"]] = evaluation
-                except Exception as e:
-                    pass
-
-            # Update results with evaluations
-            for row in all_results:
-                rid = row["Resume ID"]
-                evaluation = evaluated.get(rid)
-
-                if evaluation:
-                    row["Strengths"] = "\n".join(evaluation.strengths)
-                    row["Weaknesses"] = "\n".join(evaluation.weaknesses)
-                    row["Score"] = evaluation.score
-                    row["Summary"] = evaluation.summary
-                    row["Job Match"] = "✅ Yes" if evaluation.score >= 55 else "❌ No"
+            # Display each resume as an expandable section
+            for idx, row in df.sort_values("Score", ascending=False).iterrows():
+                if row['Score'] >= 65:
+                    score_color = "green"
+                    score_icon = "🟢"
+                elif row['Score'] >= 50:
+                    score_color = "orange"
+                    score_icon = "🟡"
                 else:
-                    row["Job Match"] = "❌ No"
-
-        df = pd.DataFrame(all_results)
-        st.success("✅ Analysis Complete")
-        
-        # Display each resume as an expandable section for better readability
-        for idx, row in df.iterrows():
-            # Color coding based on score
-            if row['Score'] >= 70:
-                score_color = "🟢"
-            elif row['Score'] >= 55:
-                score_color = "🟡"
-            else:
-                score_color = "🔴"
+                    score_color = "red"
+                    score_icon = "🔴"
                 
-            with st.expander(f"📄 {row['File Name']} - {score_color} Score: {row['Score']} - {row.get('Job Match', '❌ No')}"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.write("**👤 Personal Information:**")
-                    if row['Name']:
-                        st.write(f"**Name:** {row['Name']}")
-                    if row['Email']:
-                        st.write(f"**Email:** {row['Email']}")
-                    if row['Phone']:
-                        st.write(f"**Phone:** {row['Phone']}")
-                    if row['LinkedIn']:
-                        st.write(f"**LinkedIn:** {row['LinkedIn']}")
-                    if row['GitHub']:
-                        st.write(f"**GitHub:** {row['GitHub']}")
+                with st.expander(f"**{row['Name'] or row['File Name']}** | Score: **:{score_color}[{row['Score']}]** | Match: {row.get('Job Match', 'N/A')}"):
+                    st.subheader("📝 Evaluation Summary")
+                    st.markdown(f"**Domain:** `{row['Domain']}`")
+                    st.markdown(f"**Overall Assessment:** {row['Summary']}")
                     
-                    st.write(f"**Domain:** {row['Domain']}")
-                    st.write(f"**Resume ID:** {row['Resume ID']}")
-                
-                with col2:
-                    st.write("**📊 Evaluation:**")
-                    st.write(f"**Score:** {row['Score']}/100 {score_color}")
-                    if 'Job Match' in row:
-                        st.write(f"**Job Match:** {row['Job Match']}")
-                
-                st.write("**📝 Summary:**")
-                st.write(row['Summary'])
-                
-                col3, col4 = st.columns(2)
-                with col3:
-                    st.write("**✅ Strengths:**")
-                    strengths = row['Strengths'].split('\n') if isinstance(row['Strengths'], str) else row['Strengths']
-                    for strength in strengths:
-                        if strength.strip():
-                            st.write(f"• {strength.strip()}")
-                
-                with col4:
-                    st.write("**⚠️ Weaknesses:**")
-                    weaknesses = row['Weaknesses'].split('\n') if isinstance(row['Weaknesses'], str) else row['Weaknesses']
-                    for weakness in weaknesses:
-                        if weakness.strip():
-                            st.write(f"• {weakness.strip()}")
-        
-        st.write("---")
-        
-        # Scoring explanation
-        st.write("### 📊 Scoring Guide:")
-        st.info("""
-        **🟢 60-100**: Strong evidence of proven work and implementations
-        **🟡 40-59**: Some proven projects but limited scope or domain mismatch  
-        **🔴 Below 40**: Mostly claims without sufficient proof of implementation
-        
-        **Scoring Philosophy:**
-        - **Proven Work > Claimed Skills**: Live projects, GitHub code, deployments carry the most weight
-        - **Implementation > Knowledge**: What you've built matters more than what you've studied
-        - **Domain Relevance**: Cross-domain projects have limited impact on scores
-        - **Evidence Required**: Skill lists without project context are heavily penalized
-        
-        *Note: Even strong students typically score 40-65 without substantial proven work and relevant domain experience.*
-        """)
-        
-        # Also show a compact summary table
-        st.write("### 📋 Summary Table")
-        summary_df = df[['File Name', 'Name', 'Domain', 'Score', 'Job Match']].copy()
-        st.dataframe(
-            summary_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "File Name": st.column_config.TextColumn("File Name", width="large"),
-                "Name": st.column_config.TextColumn("Name", width="medium"),
-                "Domain": st.column_config.TextColumn("Domain", width="small"),
-                "Score": st.column_config.NumberColumn("Score", width="small", format="%d"),
-                "Job Match": st.column_config.TextColumn("Job Match", width="small")
-            }
-        )
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**✅ Strengths**")
+                        st.markdown(row['Strengths'])
+                    with col2:
+                        st.markdown("**⚠️ Weaknesses**")
+                        st.markdown(row['Weaknesses'])
+                    
+                    st.divider()
+                    st.subheader("👤 Contact Information")
+                    st.markdown(f"""
+                    - **Email:** {row['Email'] or 'Not Found'}
+                    - **Phone:** {row['Phone'] or 'Not Found'}
+                    - **LinkedIn:** [{row['LinkedIn']}]({row['LinkedIn']}) if row['LinkedIn'] else 'Not Found'
+                    - **GitHub:** [{row['GitHub']}]({row['GitHub']}) if row['GitHub'] else 'Not Found'
+                    """)
 
-        excel_buffer = BytesIO()
-        df.to_excel(excel_buffer, index=False, engine='openpyxl')
-        excel_buffer.seek(0)
+            st.write("---")
+            
+            # Show a compact summary table
+            st.write("### 📋 Summary Table")
+            summary_df = df[['Name', 'Score', 'Job Match', 'Domain', 'File Name']].copy()
+            st.dataframe(
+                summary_df.sort_values("Score", ascending=False),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Score": st.column_config.ProgressColumn(
+                        "Score",
+                        format="%d",
+                        min_value=0,
+                        max_value=100,
+                    ),
+                }
+            )
 
-        st.download_button(
-            label="📥 Download as Excel",
-            data=excel_buffer,
-            file_name="resume_analysis_improved.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            @st.cache_data
+            def convert_df_to_excel(df_to_convert):
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_to_convert.to_excel(writer, index=False, sheet_name='Resume Analysis')
+                processed_data = output.getvalue()
+                return processed_data
+
+            excel_data = convert_df_to_excel(df)
+            st.download_button(
+                label="📥 Download Full Analysis as Excel",
+                data=excel_data,
+                file_name="resume_analysis_results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
