@@ -550,12 +550,6 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
 st.set_page_config(page_title="AI Resume Analyzer - Improved")
 st.title("Resume Analyzer + Matcher + Excel Export (Improved)")
 
-st.info("🔧 **Improvements Made:**\n"
-        "• Realistic scoring (no more inflated 100/100 scores)\n"
-        "• Domain-specific evaluation (ML projects won't boost software dev scores)\n"
-        "• Better URL extraction for LinkedIn/GitHub\n"
-        "• Conservative scoring for entry-level candidates")
-
 uploaded_files = st.file_uploader("Upload Resumes", type=["pdf", "docx", "txt"], accept_multiple_files=True)
 job_desc = st.text_area("Paste Job Description (optional)")
 
