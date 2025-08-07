@@ -488,6 +488,8 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
     # Map target domain to evidence categories (Case-Insensitive)
     domain_map = {
         'ml': 'machine_learning',
+        'ai': 'machine_learning',
+        'artificial Intelligence': 'machine_learning',
         'machine learning': 'machine_learning',
         'data science': 'data_science',
         'datascience': 'data_science',
