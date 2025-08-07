@@ -31,7 +31,8 @@ TOP_K = 5
 # ------------------- Schema Definition -------------------
 class ResumeAnalysis(BaseModel):
     domain: str = Field(..., description="Predicted domain of the resume")
-    summary: Optional[str] = Field(default="Summary not provided.", description="3-line summary")
+    # summary: Optional[str] = Field(default="Summary not provided.", description="3-line summary")
+    summary: Optional[str] = Field(..., description="3-line summary")
     strengths: List[str] = Field(..., description="Resume strengths as a list")
     weaknesses: List[str] = Field(..., description="Resume weaknesses as a list")
     score: int = Field(..., description="Overall score out of 100")
@@ -83,10 +84,10 @@ evaluation_prompt = ChatPromptTemplate.from_messages([
         Candidate Resume:
         {resume_text}
 
-        Follow this format strictly:
+        Follow this format strictly,Output only this format:
         {format_instructions}
 
-        Do NOT explain anything. Output only the JSON.
+        Return strictly valid JSON starting and ending with curly braces. Do NOT explain anything.
         """)
 ])
 
@@ -174,9 +175,29 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
     except Exception as e:
         # If parser fails, attempt to recover JSON manually
         raw = response.content.strip()
+        st.info("Raw LLM output:\n", raw)
+
         try:
-            match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
-            if not match:
+            # match = re.search(r"\{(?:[^{}]|(?R))*\}", raw, re.DOTALL)
+            match = re.search(r"\{.*?\}", raw, re.DOTALL)  # Safer fallback for small JSONs
+            if match:
+                json_str = match.group()
+                try:
+                    data = json.loads(json_str)
+                    
+                    # ✅ Add validation here
+                    required_keys = ["domain", "summary", "strengths", "weaknesses", "score"]
+                    for key in required_keys:
+                        if key not in data:
+                            raise ValueError(f'Missing key: "{key}" in parsed JSON')
+
+                    return ResumeAnalysis(**data)
+
+                except Exception as e:
+                    print(f"Fallback parsing failed: {e}")
+                    return None
+
+            else:
                 raise ValueError("No JSON object found in model output.")
 
             json_str = match.group()
