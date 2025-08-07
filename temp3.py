@@ -399,89 +399,89 @@ def calculate_domain_specific_score(resume_text: str, target_domain: str) -> int
             'cross_domain_penalty': 0.1  # Only 10% penalty for ML domain - very relevant
         },
         'data_science': {
-            'core_implementations': [
-                'data visualization', 'statistical analysis', 'data cleaning', 'insights generated',
-                'dashboard created', 'report generated', 'trend analysis', 'data pipeline',
-                'business intelligence', 'predictive analytics', 'exploratory data analysis'
-            ],
-            'advanced_implementations': [
-                'big data processing', 'etl pipeline', 'data warehouse', 'real-time analytics',
-                'ab testing', 'statistical modeling', 'time series analysis'
-            ],
-            'deployment_proof': [
-                'tableau dashboard', 'power bi', 'plotly dashboard', 'jupyter notebook',
-                'data api', 'automated reports', 'business dashboard'
-            ],
-            'relevant_domains': ['machine learning', 'analytics', 'business intelligence', 'statistics'],
-            'cross_domain_penalty': 0.4  # 60% penalty for non-DS domains
-        },
-        'software_development': {
-            'core_implementations': [
-                'rest api', 'database connection', 'user authentication', 'responsive design',
-                'full stack application', 'web application', 'mobile app', 'backend server',
-                'frontend interface', 'database schema', 'deployed application'
-            ],
-            'advanced_implementations': [
-                'microservices', 'system architecture', 'scalable backend', 'real-time features',
-                'payment integration', 'third party apis', 'performance optimization'
-            ],
-            'deployment_proof': [
-                'live website', 'app store', 'play store', 'heroku', 'netlify', 'vercel',
-                'aws deployment', 'docker container', 'kubernetes'
-            ],
-            'relevant_domains': ['web development', 'mobile development', 'full stack', 'backend', 'frontend'],
-            'cross_domain_penalty': 0.5  # 50% penalty for non-software domains
-        },
-        'devops': {
-            'core_implementations': [
-                'ci/cd pipeline', 'automated deployment', 'infrastructure setup', 'monitoring system',
-                'containerized application', 'cloud deployment', 'server configuration',
-                'automated testing', 'deployment script', 'infrastructure code'
-            ],
-            'advanced_implementations': [
-                'kubernetes orchestration', 'terraform infrastructure', 'monitoring dashboards',
-                'log aggregation', 'security automation', 'disaster recovery'
-            ],
-            'deployment_proof': [
-                'jenkins pipeline', 'gitlab ci', 'github actions', 'docker hub',
-                'cloud formation', 'ansible playbook', 'monitoring alerts'
-            ],
-            'relevant_domains': ['cloud computing', 'infrastructure', 'automation', 'sre'],
-            'cross_domain_penalty': 0.6  # 40% penalty for non-devops domains
-        },
-        'frontend_development': {
-            'core_implementations': [
-                'responsive design', 'user interface', 'interactive components', 'state management',
-                'api integration', 'form validation', 'routing', 'component architecture'
-            ],
-            'advanced_implementations': [
-                'performance optimization', 'accessibility features', 'progressive web app',
-                'server side rendering', 'real-time updates', 'advanced animations'
-            ],
-            'deployment_proof': [
-                'live website', 'netlify deployment', 'vercel deployment', 'github pages',
-                'cdn deployment', 'mobile responsive', 'cross-browser testing'
-            ],
-            'relevant_domains': ['ui/ux', 'web development', 'mobile development'],
-            'cross_domain_penalty': 0.5
-        },
-        'backend_development': {
-            'core_implementations': [
-                'rest api', 'database design', 'authentication system', 'api documentation',
-                'data validation', 'error handling', 'logging', 'testing'
-            ],
-            'advanced_implementations': [
-                'microservices architecture', 'caching strategy', 'load balancing',
-                'database optimization', 'security implementation', 'rate limiting'
-            ],
-            'deployment_proof': [
-                'api endpoints', 'database deployment', 'server deployment', 'cloud hosting',
-                'docker container', 'performance metrics', 'uptime monitoring'
-            ],
-            'relevant_domains': ['full stack', 'web development', 'api development'],
-            'cross_domain_penalty': 0.5
+            'core_implementations': [
+                'data visualization', 'statistical analysis', 'data cleaning', 'insights generated',
+                'dashboard created', 'report generated', 'trend analysis', 'data pipeline',
+                'business intelligence', 'predictive analytics', 'exploratory data analysis'
+            ],
+            'advanced_implementations': [
+                'big data processing', 'etl pipeline', 'data warehouse', 'real-time analytics',
+                'ab testing', 'statistical modeling', 'time series analysis'
+            ],
+            'deployment_proof': [
+                'tableau dashboard', 'power bi', 'plotly dashboard', 'jupyter notebook',
+                'data api', 'automated reports', 'business dashboard'
+            ],
+            'relevant_domains': ['machine learning', 'analytics', 'business intelligence', 'statistics'],
+            'cross_domain_penalty': 0.4  # 60% penalty for non-DS domains
+        },
+        'software_development': {
+            'core_implementations': [
+                'rest api', 'database connection', 'user authentication', 'responsive design',
+                'full stack application', 'web application', 'mobile app', 'backend server',
+                'frontend interface', 'database schema', 'deployed application'
+            ],
+            'advanced_implementations': [
+                'microservices', 'system architecture', 'scalable backend', 'real-time features',
+                'payment integration', 'third party apis', 'performance optimization'
+            ],
+            'deployment_proof': [
+                'live website', 'app store', 'play store', 'heroku', 'netlify', 'vercel',
+                'aws deployment', 'docker container', 'kubernetes'
+            ],
+            'relevant_domains': ['web development', 'mobile development', 'full stack', 'backend', 'frontend'],
+            'cross_domain_penalty': 0.5  # 50% penalty for non-software domains
+        },
+        'devops': {
+            'core_implementations': [
+                'ci/cd pipeline', 'automated deployment', 'infrastructure setup', 'monitoring system',
+                'containerized application', 'cloud deployment', 'server configuration',
+                'automated testing', 'deployment script', 'infrastructure code'
+            ],
+            'advanced_implementations': [
+                'kubernetes orchestration', 'terraform infrastructure', 'monitoring dashboards',
+                'log aggregation', 'security automation', 'disaster recovery'
+            ],
+            'deployment_proof': [
+                'jenkins pipeline', 'gitlab ci', 'github actions', 'docker hub',
+                'cloud formation', 'ansible playbook', 'monitoring alerts'
+            ],
+            'relevant_domains': ['cloud computing', 'infrastructure', 'automation', 'sre'],
+            'cross_domain_penalty': 0.6  # 40% penalty for non-devops domains
+        },
+        'frontend_development': {
+            'core_implementations': [
+                'responsive design', 'user interface', 'interactive components', 'state management',
+                'api integration', 'form validation', 'routing', 'component architecture'
+            ],
+            'advanced_implementations': [
+                'performance optimization', 'accessibility features', 'progressive web app',
+                'server side rendering', 'real-time updates', 'advanced animations'
+            ],
+            'deployment_proof': [
+                'live website', 'netlify deployment', 'vercel deployment', 'github pages',
+                'cdn deployment', 'mobile responsive', 'cross-browser testing'
+            ],
+            'relevant_domains': ['ui/ux', 'web development', 'mobile development'],
+            'cross_domain_penalty': 0.5
+        },
+        'backend_development': {
+            'core_implementations': [
+                'rest api', 'database design', 'authentication system', 'api documentation',
+                'data validation', 'error handling', 'logging', 'testing'
+            ],
+            'advanced_implementations': [
+                'microservices architecture', 'caching strategy', 'load balancing',
+                'database optimization', 'security implementation', 'rate limiting'
+            ],
+            'deployment_proof': [
+                'api endpoints', 'database deployment', 'server deployment', 'cloud hosting',
+                'docker container', 'performance metrics', 'uptime monitoring'
+            ],
+            'relevant_domains': ['full stack', 'web development', 'api development'],
+            'cross_domain_penalty': 0.5
 
-        }
+        }
     }
     
     
@@ -573,9 +573,9 @@ mapped_domain = domain_map.get(target_domain.lower(), 'software_development')
         ],
         'software_development': ['hackathon', 'coding competition', 'app competition'],
 
-        'data_science': ['analytics competition', 'data hackathon', 'kaggle'],
+        'data_science': ['analytics competition', 'data hackathon', 'kaggle'],
 
-        'devops': ['cloud competition', 'infrastructure challenge']
+        'devops': ['cloud competition', 'infrastructure challenge']
     }
     
     relevant_competitions = competition_domains.get(mapped_domain, [])
@@ -652,25 +652,25 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
         target_domain = 'machine_learning'
     elif any(term in jd_lower for term in ['data scientist', 'data analyst', 'business intelligence', 'analytics', 'data engineer']):
 
-        target_domain = 'data_science'
+        target_domain = 'data_science'
 
-    elif any(term in jd_lower for term in ['devops', 'site reliability', 'infrastructure', 'cloud engineer', 'deployment engineer']):
+    elif any(term in jd_lower for term in ['devops', 'site reliability', 'infrastructure', 'cloud engineer', 'deployment engineer']):
 
-        target_domain = 'devops'
+        target_domain = 'devops'
 
-    elif any(term in jd_lower for term in ['frontend', 'front-end', 'ui developer', 'react developer', 'angular developer', 'vue developer']):
+    elif any(term in jd_lower for term in ['frontend', 'front-end', 'ui developer', 'react developer', 'angular developer', 'vue developer']):
 
-        target_domain = 'frontend_development'
+        target_domain = 'frontend_development'
 
-    elif any(term in jd_lower for term in ['backend', 'back-end', 'api developer', 'server developer', 'database developer']):
+    elif any(term in jd_lower for term in ['backend', 'back-end', 'api developer', 'server developer', 'database developer']):
 
-        target_domain = 'backend_development'
+        target_domain = 'backend_development'
 
-    elif any(term in jd_lower for term in ['software developer', 'full stack', 'web developer', 'application developer']):
+    elif any(term in jd_lower for term in ['software developer', 'full stack', 'web developer', 'application developer']):
 
-        target_domain = 'software_development'
+        target_domain = 'software_development'
 
-    
+    
     
     for attempt in range(3):
         try:
@@ -709,19 +709,19 @@ def evaluate_resume_vs_jd(resume_text: str, jd_text: str):
                 
                 # Ensure correct data types
 
-                if not isinstance(data["strengths"], list):
-                    if isinstance(data["strengths"], str):
-                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
-                    else:
-                        data["strengths"] = ["Shows learning potential and technical curiosity"]
-              
+                if not isinstance(data["strengths"], list):
+                    if isinstance(data["strengths"], str):
+                        data["strengths"] = [s.strip() for s in data["strengths"].split('\n') if s.strip()]
+                    else:
+                        data["strengths"] = ["Shows learning potential and technical curiosity"]
+              
 
-                if not isinstance(data["weaknesses"], list):
-                    if isinstance(data["weaknesses"], str):
-                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
-                    else:
-                        data["weaknesses"] = ["Limited domain-specific experience"]
-     
+                if not isinstance(data["weaknesses"], list):
+                    if isinstance(data["weaknesses"], str):
+                        data["weaknesses"] = [w.strip() for w in data["weaknesses"].split('\n') if w.strip()]
+                    else:
+                        data["weaknesses"] = ["Limited domain-specific experience"]
+     
 
                 # REVISED SCORING LOGIC:
                 # The primary score is now the robust, evidence-based programmatic score.
